@@ -32,12 +32,42 @@ export function relayRegion(cardText: string): string | null {
   }
 }
 
+// Moritz' two machines, built in so the phone needs no card pasting. A card
+// only says where a host is reachable; access still requires that the host
+// has accepted this browser's key. Mini first: it runs around the clock,
+// the MacBook sleeps with the lid closed.
+export const KNOWN_HOSTS: SavedHost[] = [
+  {
+    name: "Mac Mini",
+    endpointId: "19736644c81a262765fa4dc07f6d265769d45bcd105ba7fee65ec6b5bb9cb893",
+    card: "goose+roam://eyJ2ZXJzaW9uIjoxLCJlbmRwb2ludF9pZCI6IjE5NzM2NjQ0YzgxYTI2Mjc2NWZhNGRjMDdmNmQyNjU3NjlkNDViY2QxMDViYTdmZWU2NWVjNmI1YmI5Y2I4OTMiLCJyZWxheV91cmxzIjpbImh0dHBzOi8vdXN3MS0yLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vdXNlMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vZXVjMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vYXBzMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyJdfQ",
+  },
+  {
+    name: "MacBook",
+    endpointId: "9fd789f25355c67dd38f75be81c76cc5aa01a66cff6bab2a9895d5ee4e921c30",
+    card: "goose+roam://eyJ2ZXJzaW9uIjoxLCJlbmRwb2ludF9pZCI6IjlmZDc4OWYyNTM1NWM2N2RkMzhmNzViZTgxYzc2Y2M1YWEwMWE2NmNmZjZiYWIyYTk4OTVkNWVlNGU5MjFjMzAiLCJyZWxheV91cmxzIjpbImh0dHBzOi8vdXN3MS0yLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vdXNlMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vZXVjMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyIsImh0dHBzOi8vYXBzMS0xLnJlbGF5Lm1pY2hhZWxuZWFsZS5tZXNoLWxsbS5pcm9oLmxpbmsuLyJdfQ",
+  },
+];
+
+// Sort key for host lists: built-in machines in their fixed order, others after.
+export function hostRank(endpointId: string): number {
+  const i = KNOWN_HOSTS.findIndex((h) => h.endpointId === endpointId);
+  return i < 0 ? KNOWN_HOSTS.length : i;
+}
+
+export function hostLabel(endpointId: string, fallback: string): string {
+  return KNOWN_HOSTS.find((h) => h.endpointId === endpointId)?.name ?? fallback;
+}
+
 export function loadHosts(): SavedHost[] {
+  let saved: SavedHost[] = [];
   try {
-    return JSON.parse(localStorage.getItem(HOSTS_KEY) ?? "[]");
+    saved = JSON.parse(localStorage.getItem(HOSTS_KEY) ?? "[]");
   } catch {
-    return [];
+    saved = [];
   }
+  const known = KNOWN_HOSTS.filter((k) => !saved.some((h) => h.endpointId === k.endpointId));
+  return [...saved, ...known];
 }
 
 // Endpoint id straight out of the card JSON — for keying reconnect attempts
