@@ -14,12 +14,14 @@ import {
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type PlanEntry,
+  type ContentBlock,
 } from "@agentclientprotocol/sdk";
 import { GooseClient } from "@aaif/goose-sdk";
 import jsQR from "jsqr";
 import { Button } from "@desktop/components/ui/button";
-import { ChevronDown, ChevronLeft, ChevronRight, Menu, SlidersHorizontal, Square } from "lucide-react";
-import { SessionMatrix } from "./SessionMatrix";
+import { ChevronDown, ChevronLeft, ChevronRight, Menu, Paperclip, Plus, SlidersHorizontal, Square, X } from "lucide-react";
+import { StartPage } from "./StartPage";
+import { readAttachment, attachmentBlocks, type Attachment } from "./attachments";
 import MarkdownContent from "@desktop/components/MarkdownContent";
 import { Goose } from "@desktop/components/icons/Goose";
 import { ToolCallStatusIndicator, type ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
@@ -33,6 +35,8 @@ import {
   type SavedHost,
   type HostConn,
   loadHosts,
+  hostRank,
+  hostLabel,
   cardEndpointHint,
   relayRegion,
   loadCollapsed,
@@ -189,6 +193,16 @@ export function App({ roam }: { roam: RoamClient }) {
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const [logWindow, setLogWindow] = useState(80);
   const [busy, setBusy] = useState(false);
+  // Navigation never waits for the open chat: "new chat" and "back" only
+  // block while a new chat is being created. navToken bumps on every switch
+  // so late results of the chat we left (a running turn, a slow load) can
+  // tell they are stale and leave the screen alone.
+  const [creating, setCreating] = useState(false);
+  const [pickHost, setPickHost] = useState(false);
+  const navToken = useRef(0);
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   // True while re-dialing a known host (boot restore or dropped connection).
   // Shows a quiet "connecting…" screen instead of flashing the hosts page.
   const [reconnecting, setReconnecting] = useState(false);
@@ -361,22 +375,17 @@ export function App({ roam }: { roam: RoamClient }) {
       void connect(linked);
       return;
     }
-    const saved = localStorage.getItem(HOST_CARD_KEY);
-    if (!saved) return;
-    setCard(saved);
-    // Known host: this is a resume, not a first visit — show "connecting"
-    // instead of flashing the hosts page while the dial lands.
+    // Dial every known host (built-in machines included) and land on the
+    // start page. Reopening the last chat on launch trapped the phone inside
+    // it: starting a new request meant first getting out of a chat that the
+    // desktop was often still driving.
+    const saved = loadHosts().sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId));
+    if (saved.length === 0) return;
+    setCard(saved[0].card);
     setReconnecting(true);
-    const last = localStorage.getItem(SESSION_KEY);
-    if (last) {
-      const [hostId, sessionId] = last.split("|");
-      if (hostId && sessionId && cardEndpointHint(saved) === hostId) {
-        // connect() resumes this session once the dial lands (same path a
-        // mid-conversation reconnect takes).
-        resumeAfterDrop.current = sessionId;
-      }
-    }
-    void connect(saved);
+    void (async () => {
+      for (const h of saved) await connect(h.card);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -412,6 +421,8 @@ export function App({ roam }: { roam: RoamClient }) {
   const makeClient = useCallback((): Client => {
     return {
       async sessionUpdate(params: SessionNotification): Promise<void> {
+        // A chat we navigated away from may still be streaming its turn.
+        if (params.sessionId !== sessionRef.current) return;
         const u = params.update;
         switch (u.sessionUpdate) {
           case "user_message_chunk":
@@ -499,6 +510,7 @@ export function App({ roam }: { roam: RoamClient }) {
       async requestPermission(
         params: RequestPermissionRequest,
       ): Promise<RequestPermissionResponse> {
+        if (params.sessionId !== sessionRef.current) return { outcome: { outcome: "cancelled" } };
         const optionId = await new Promise<string | null>((resolve) => {
           streamRole.current = null;
           setItems((xs) => [
@@ -579,13 +591,49 @@ export function App({ roam }: { roam: RoamClient }) {
     setProjects(Object.assign({}, ...maps));
   }, []);
 
+  // Close the open chat on this screen only. Its turn keeps running on the
+  // host; the stale-result guards (navToken, sessionId filter) keep it from
+  // writing into whatever is opened next.
+  const leaveSession = useCallback(() => {
+    navToken.current += 1;
+    sessionRef.current = null;
+    lastSeenUpdate.current = null;
+    replayBuf.current = null;
+    activeRunRef.current = null;
+    setSessionId(null);
+    setItems([]);
+    setActiveRun(null);
+    setBusy(false);
+    setTurnStartedAt(null);
+    setCancelling(false);
+    setExternalActive(false);
+    setExternalOverride(false);
+    setConfigOptions([]);
+    setShowConfig(false);
+    setPending([]);
+    setAttachError(null);
+    setStatus("connected");
+    setStatusKind("ok");
+    localStorage.removeItem(SESSION_KEY);
+    document.title = "goose";
+  }, []);
+
+  const connectedHosts = useCallback(
+    () => [...hostsRef.current.values()].sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId)),
+    [],
+  );
+
   const newSession = useCallback(async (hostId?: string) => {
-    const hid = hostId ?? activeHostRef.current ?? hostsRef.current.keys().next().value ?? null;
+    const hid = hostId ?? connectedHosts()[0]?.endpointId ?? null;
     const host = hid ? hostsRef.current.get(hid) : null;
     if (!host) return;
-    setBusy(true);
+    setPickHost(false);
+    leaveSession();
+    const token = navToken.current;
+    setCreating(true);
     try {
       const res = await host.agent.newSession({ cwd: "/", mcpServers: [] });
+      if (navToken.current !== token) return;
       const opts = ((res as { configOptions?: unknown[] }).configOptions ?? []) as ConfigOption[];
       setConfigOptions(opts);
       const m = modelFromConfigOptions(opts);
@@ -595,20 +643,35 @@ export function App({ roam }: { roam: RoamClient }) {
       setActiveHostId(host.endpointId);
       sessionRef.current = res.sessionId;
       setSessionId(res.sessionId);
-      setItems([{ kind: "system", id: nextId++, text: "New session — say hello" }]);
+      setItems([{ kind: "system", id: nextId++, text: `Neuer Chat auf ${hostLabel(host.endpointId, host.name)}` }]);
       void refreshSessions();
+      requestAnimationFrame(() => inputRef.current?.focus());
     } catch (err) {
-      push({ kind: "system", text: `could not start session: ${err}` } as Omit<Item, "id">);
+      setStatus(`Neuer Chat ging nicht: ${err}`);
+      setStatusKind("err");
     } finally {
-      setBusy(false);
+      setCreating(false);
     }
-  }, [push, refreshSessions]);
+  }, [refreshSessions, leaveSession, connectedHosts]);
+
+  // One machine connected: start right away. Several: let the user pick.
+  const startNew = useCallback(() => {
+    if (hostsRef.current.size > 1) setPickHost(true);
+    else void newSession();
+  }, [newSession]);
 
   const openSession = useCallback(
     async (hostId: string, id: string, force = false, keepExternalGuard = false) => {
       const host = hostsRef.current.get(hostId);
       if (!host) return;
       if (id === sessionRef.current && hostId === activeHostRef.current && !force) return;
+      // A user-initiated switch is a navigation; a follow-mode refresh of the
+      // same chat is not, so a running turn there keeps its state.
+      if (!force) {
+        setPickHost(false);
+        leaveSession();
+      }
+      const token = navToken.current;
       setBusy(true);
       setStatus("loading session…");
       setStatusKind("busy");
@@ -644,6 +707,7 @@ export function App({ roam }: { roam: RoamClient }) {
           mcpServers: [],
           _meta: { replayTail: REPLAY_TAIL },
         });
+        if (navToken.current !== token) return;
         const buf = replayBuf.current ?? [];
         replayBuf.current = null;
         const skipped = (res?._meta as Record<string, unknown> | undefined)?.replaySkipped;
@@ -659,16 +723,19 @@ export function App({ roam }: { roam: RoamClient }) {
         setStatus("connected");
         setStatusKind("ok");
       } catch (err) {
+        if (navToken.current !== token) return;
         push({ kind: "system", text: `could not load session: ${err}` } as Omit<Item, "id">);
         setStatus("connected");
         setStatusKind("ok");
       } finally {
-        replayBuf.current = null;
-        setBusy(false);
-        inputRef.current?.focus();
+        if (navToken.current === token) {
+          replayBuf.current = null;
+          setBusy(false);
+          inputRef.current?.focus();
+        }
       }
     },
-    [push],
+    [push, leaveSession],
   );
 
   // Follow mode: the ACP server only streams updates to the connection that
@@ -851,12 +918,12 @@ export function App({ roam }: { roam: RoamClient }) {
     }
   }, [activeAgent, push]);
 
-  const steer = useCallback(async (sid: string, text: string, runId: string) => {
+  const steer = useCallback(async (sid: string, prompt: ContentBlock[], runId: string) => {
     const agent = activeAgent();
     if (!agent) return;
     await agent.extMethod("_goose/unstable/session/steer", {
       sessionId: sid,
-      prompt: [{ type: "text", text }],
+      prompt,
       expectedRunId: runId,
     });
   }, [activeAgent]);
@@ -865,18 +932,27 @@ export function App({ roam }: { roam: RoamClient }) {
     const agent = activeAgent();
     const sid = sessionRef.current;
     const el = inputRef.current;
-    const text = el?.value.trim();
-    if (!agent || !sid || !text) return;
+    const text = el?.value.trim() ?? "";
+    const files = pending;
+    if (!agent || !sid || (!text && files.length === 0)) return;
     // Loop-boundary guard: a foreign process is driving this session and the
     // user hasn't explicitly overridden — don't start a second loop.
     if (externalActive && !externalOverride) return;
     const runId = activeRunRef.current;
     if (busy && !runId) return;
+    const blocks = [
+      ...(text || files.length === 0 ? [{ type: "text" as const, text: text || "" }] : []),
+      ...attachmentBlocks(files),
+    ];
+    const shown = [text, ...files.map((f) => `📎 ${f.name}`)].filter(Boolean).join("\n");
+    setPending([]);
+    setAttachError(null);
+    const token = navToken.current;
 
     if (runId) {
       if (el) el.value = "";
       try {
-        await steer(sid, text, runId);
+        await steer(sid, blocks, runId);
         // pickup echoes back as a user_message_chunk; no local append needed
       } catch (err) {
         push({ kind: "system", text: `steer failed: ${err}` } as Omit<Item, "id">);
@@ -887,7 +963,7 @@ export function App({ roam }: { roam: RoamClient }) {
 
     if (el) el.value = "";
     streamRole.current = null;
-    setItems((xs) => [...xs, { kind: "msg", id: nextId++, role: "user", text }]);
+    setItems((xs) => [...xs, { kind: "msg", id: nextId++, role: "user", text: shown }]);
     streamRole.current = null;
     setBusy(true);
     setTurnStartedAt(Date.now());
@@ -895,7 +971,8 @@ export function App({ roam }: { roam: RoamClient }) {
     setStatus("thinking…");
     setStatusKind("busy");
     try {
-      const res = await agent.prompt({ sessionId: sid, prompt: [{ type: "text", text }] });
+      const res = await agent.prompt({ sessionId: sid, prompt: blocks });
+      if (navToken.current !== token) return;
       streamRole.current = null;
       if (res.stopReason && res.stopReason !== "end_turn") {
         push({ kind: "system", text: `· ${res.stopReason}` } as Omit<Item, "id">);
@@ -906,7 +983,7 @@ export function App({ roam }: { roam: RoamClient }) {
       if (bounce) {
         // A loop driven elsewhere owns this session — queue into it instead.
         try {
-          await steer(sid, text, bounce[1]);
+          await steer(sid, blocks, bounce[1]);
           push({ kind: "system", text: "queued into the running turn" } as Omit<Item, "id">);
         } catch (err2) {
           push({ kind: "system", text: `steer failed: ${err2}` } as Omit<Item, "id">);
@@ -915,6 +992,7 @@ export function App({ roam }: { roam: RoamClient }) {
         push({ kind: "system", text: `error: ${err}` } as Omit<Item, "id">);
       }
     } finally {
+      if (navToken.current === token) {
       activeRunRef.current = null;
       setActiveRun(null);
       setBusy(false);
@@ -923,8 +1001,9 @@ export function App({ roam }: { roam: RoamClient }) {
       setStatus("connected");
       setStatusKind("ok");
       inputRef.current?.focus();
+      }
     }
-  }, [busy, push, refreshSessions, steer, activeAgent, externalActive, externalOverride]);
+  }, [busy, pending, push, refreshSessions, steer, activeAgent, externalActive, externalOverride]);
 
   // Stop the running turn. ACP cancel is a notification: the prompt call
   // itself returns (stopReason: cancelled), which runs send()'s cleanup.
@@ -964,7 +1043,7 @@ export function App({ roam }: { roam: RoamClient }) {
             </button>
           )}
           <Goose className="w-5 h-5" />
-          <span className="font-bold text-[15px] whitespace-nowrap">goose remote</span>
+          <span className="font-bold text-[15px] whitespace-nowrap">goose</span>
           <span id="build-stamp" className="hidden md:inline text-[10px] text-text-tertiary font-mono self-end pb-0.5">{BUILD}</span>
         </div>
         <div className="flex items-center gap-2.5 min-w-0 shrink">
@@ -988,6 +1067,16 @@ export function App({ roam }: { roam: RoamClient }) {
             <span aria-hidden className="inline-block w-2 h-2 rounded-full bg-current shrink-0" />
             <span className={connected ? "hidden md:inline" : "truncate max-w-[180px] md:max-w-none"}>{status}</span>
           </span>
+          {connected && (
+            <button
+              id="header-new-chat"
+              disabled={creating}
+              onClick={() => { setSidebarOpen(false); startNew(); }}
+              className="shrink-0 inline-flex items-center gap-1 bg-background-inverse text-text-inverse text-xs font-semibold rounded-lg px-2.5 py-1.5 hover:brightness-110 disabled:opacity-50"
+            >
+              <Plus className="w-3.5 h-3.5" /> Neu
+            </button>
+          )}
           {connected && (
             <button
               id="switch-host"
@@ -1047,11 +1136,11 @@ export function App({ roam }: { roam: RoamClient }) {
           >
             <button
               id="new-session"
-              disabled={busy}
-              onClick={() => { setSidebarOpen(false); void newSession(); }}
+              disabled={creating}
+              onClick={() => { setSidebarOpen(false); startNew(); }}
               className="mx-3 bg-background-inverse text-text-inverse font-semibold rounded-lg px-3 py-1.5 hover:brightness-110 disabled:opacity-50"
             >
-              + New session
+              + Neuer Chat
             </button>
             <div id="session-list" className="overflow-y-auto flex flex-col">
               {groupSessions(sessions, projects).map(({ key, label, sessions: group }) => (
@@ -1109,30 +1198,22 @@ export function App({ roam }: { roam: RoamClient }) {
 
           <main id="chat" className="flex flex-col min-h-0 flex-1 min-w-0">
             {sessionId === null ? (
-              <SessionMatrix
+              <StartPage
+                hosts={connectedHosts().map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }))}
                 sessions={sessions}
+                creating={creating}
+                onNew={(hid) => void newSession(hid)}
                 onOpen={(s) => { if (s._host) void openSession(s._host, s.sessionId); }}
-                onNew={() => void newSession()}
-                busy={busy}
               />
             ) : (
             <>
             <div className="shrink-0 px-3 md:px-6 pt-2 flex items-center gap-2 min-w-0">
               <button
                 id="back-to-matrix"
-                disabled={busy}
-                onClick={() => {
-                  sessionRef.current = null;
-                  lastSeenUpdate.current = null;
-                  setSessionId(null);
-                  setItems([]);
-                  setExternalActive(false);
-                  setExternalOverride(false);
-                  document.title = "goose remote";
-                }}
-                className="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary disabled:opacity-40"
+                onClick={leaveSession}
+                className="shrink-0 inline-flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
               >
-                <ChevronLeft className="w-3.5 h-3.5" /> sessions
+                <ChevronLeft className="w-3.5 h-3.5" /> Chats
               </button>
               <span className="text-xs text-text-tertiary truncate">
                 {sessions.find((x) => x._host === activeHostId && x.sessionId === sessionId)?.title ?? ""}
@@ -1378,7 +1459,58 @@ export function App({ roam }: { roam: RoamClient }) {
                   </button>
                 </div>
               )}
-              <div className="max-w-3xl mx-auto w-full flex gap-2.5 items-end rounded-xl bg-background-secondary focus-within:ring-2 focus-within:ring-border-info px-1.5 py-1 transition-shadow">
+              {(pending.length > 0 || attachError) && (
+                <div id="attachments" className="max-w-3xl mx-auto w-full mb-1.5 flex flex-wrap gap-1.5">
+                  {pending.map((f, i) => (
+                    <span
+                      key={`${f.name}-${i}`}
+                      className="attachment-chip inline-flex items-center gap-1 text-[11px] bg-background-secondary rounded-full pl-2.5 pr-1 py-0.5 max-w-[220px]"
+                    >
+                      <span className="truncate">📎 {f.name}</span>
+                      <button
+                        type="button"
+                        aria-label={`${f.name} entfernen`}
+                        className="p-0.5 text-text-secondary hover:text-text-primary"
+                        onClick={() => setPending((xs) => xs.filter((_, j) => j !== i))}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  {attachError && <span className="text-[11px] text-text-danger">{attachError}</span>}
+                </div>
+              )}
+              <input
+                ref={fileRef}
+                id="file-input"
+                type="file"
+                multiple
+                className="hidden"
+                onChange={async (e) => {
+                  const list = [...(e.target.files ?? [])];
+                  e.target.value = "";
+                  setAttachError(null);
+                  for (const f of list) {
+                    try {
+                      const a = await readAttachment(f);
+                      setPending((xs) => [...xs, a]);
+                    } catch (err) {
+                      setAttachError(String(err instanceof Error ? err.message : err));
+                    }
+                  }
+                }}
+              />
+              <div className="max-w-3xl mx-auto w-full flex gap-1.5 items-end rounded-xl bg-background-secondary focus-within:ring-2 focus-within:ring-border-info px-1.5 py-1 transition-shadow">
+              <button
+                id="attach-btn"
+                type="button"
+                aria-label="Datei oder Foto anhaengen"
+                disabled={(busy && !activeRun) || (externalActive && !externalOverride)}
+                onClick={() => fileRef.current?.click()}
+                className="shrink-0 p-2 mb-0.5 text-text-secondary hover:text-text-primary disabled:opacity-40"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
               <textarea
                 ref={inputRef}
                 id="prompt-input"
@@ -1390,7 +1522,7 @@ export function App({ roam }: { roam: RoamClient }) {
                     ? "Running in another goose — watching…"
                     : activeRun
                       ? "Steer the running turn…"
-                      : "Message goose…"
+                      : "Nachricht an goose…"
                 }
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -1405,7 +1537,7 @@ export function App({ roam }: { roam: RoamClient }) {
                 disabled={(busy && !activeRun) || (externalActive && !externalOverride)}
                 className="bg-background-inverse text-text-inverse text-sm font-medium rounded-lg px-3.5 py-1.5 mb-0.5 mr-0.5 hover:brightness-110 disabled:opacity-50"
               >
-                {activeRun ? "steer" : "send"}
+                {activeRun ? "nachschieben" : "senden"}
               </button>
               </div>
             </form>
@@ -1413,6 +1545,33 @@ export function App({ roam }: { roam: RoamClient }) {
             )}
           </main>
         </section>
+      )}
+      {pickHost && connected && (
+        <div
+          id="host-picker"
+          className="fixed inset-0 z-40 bg-black/40 flex items-end md:items-center justify-center"
+          onClick={() => setPickHost(false)}
+        >
+          <div
+            className="w-full md:w-[360px] bg-background-primary rounded-t-2xl md:rounded-2xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-2.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-sm font-semibold">Neuer Chat auf welchem Rechner?</div>
+            {connectedHosts().map((h) => (
+              <button
+                key={h.endpointId}
+                disabled={creating}
+                onClick={() => void newSession(h.endpointId)}
+                className="pick-host w-full bg-background-inverse text-text-inverse font-semibold rounded-xl px-4 py-3 hover:brightness-110 disabled:opacity-50"
+              >
+                {hostLabel(h.endpointId, h.name)}
+              </button>
+            ))}
+            <button className="text-xs text-text-secondary py-1" onClick={() => setPickHost(false)}>
+              abbrechen
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
