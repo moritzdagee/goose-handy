@@ -112,4 +112,45 @@ describe("StartPage", () => {
     fireEvent.click(screen.getByText("(ohne Titel)"));
     expect(onOpen).toHaveBeenCalledWith(target);
   });
+
+  describe("Rechner-Filter", () => {
+    const list = [
+      sess("m1", "mini-id", "Mini eins", minsAgo(1)),
+      sess("b1", "book-id", "Book eins", minsAgo(2)),
+      { ...sess("p1", "book-id", "Vom Handy", minsAgo(3)), cwd: "/Users/m/Vom iPhone gestartet" } as TaggedSession,
+    ];
+
+    it("Alle, Mac Mini, MacBook mit Anzahl; Auswahl meldet den Rechner", () => {
+      const onFilter = vi.fn();
+      setup({ sessions: list, filterChoices: [MINI, BOOK], onFilter });
+      const tabs = [...document.querySelectorAll(".host-filter [role=tab]")].map((t) => t.textContent);
+      expect(tabs).toEqual(["Alle 3", "Mac Mini 1", "MacBook 2"]);
+      fireEvent.click(document.querySelector('[data-filter="book-id"]')!);
+      expect(onFilter).toHaveBeenCalledWith("book-id");
+    });
+
+    it("gefiltert erscheinen nur Chats des gewaehlten Rechners, ohne Rechner-Zusatz", () => {
+      setup({ sessions: list, filterChoices: [MINI, BOOK], filter: "mini-id" });
+      expect(recentTitles()).toEqual(["Mini eins"]);
+      expect(document.querySelector(".recent-chat")!.textContent).not.toContain("Mac Mini");
+    });
+
+    it("Chats eines gerade nicht verbundenen Rechners tragen trotzdem seinen Namen", () => {
+      setup({ hosts: [MINI], sessions: list, filterChoices: [MINI, BOOK] });
+      const rows = [...document.querySelectorAll(".recent-chat")].map((el) => el.textContent);
+      expect(rows[1]).toContain("MacBook");
+    });
+
+    it("vom iPhone gestartete Chats sind markiert", () => {
+      setup({ sessions: list, filterChoices: [MINI, BOOK] });
+      const rows = [...document.querySelectorAll(".recent-chat")].map((el) => el.textContent);
+      expect(rows[2]).toContain("vom iPhone");
+      expect(rows[0]).not.toContain("vom iPhone");
+    });
+
+    it("nur ein Rechner bekannt: keine Filter-Leiste", () => {
+      setup({ hosts: [MINI], sessions: list, filterChoices: [MINI] });
+      expect(document.querySelector(".host-filter")).toBeNull();
+    });
+  });
 });

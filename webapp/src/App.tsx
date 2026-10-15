@@ -49,7 +49,25 @@ import {
   relayRegion,
   loadCollapsed,
 } from "./hosts";
-import { groupSessions, type TaggedSession } from "./sessions";
+import {
+  PHONE_FOLDER,
+  filterByHost,
+  groupSessions,
+  loadHostFilter,
+  mergeHostLists,
+  saveHostFilter,
+  type HostFilter,
+  type TaggedSession,
+} from "./sessions";
+import {
+  cacheableItems,
+  loadChat,
+  loadSessions as loadCachedSessions,
+  saveChat,
+  saveSessions as saveCachedSessions,
+  type CachedItem,
+} from "./cache";
+import { HostFilterBar } from "./HostFilterBar";
 import { ConnectPanel } from "./ConnectPanel";
 
 type PermOption = { optionId: string; name: string; kind: string };
@@ -190,13 +208,34 @@ const REPLAY_TAIL = 200;
 
 let nextId = 1;
 
+// Cached chat tail back into screen items (fresh ids, no live callbacks).
+function fromCache(cached: CachedItem[]): Item[] {
+  return cached.map((c) =>
+    c.kind === "tool"
+      ? { ...c, id: nextId++, status: c.status as ToolCallStatus }
+      : c.kind === "plan"
+        ? { kind: "plan", id: nextId++, entries: c.entries as PlanEntry[] }
+        : ({ ...c, id: nextId++ } as Item),
+  );
+}
+
 export function App({ roam }: { roam: RoamClient }) {
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState("not connected");
   const [statusKind, setStatusKind] = useState<"idle" | "busy" | "ok" | "err">("idle");
   const [connected, setConnected] = useState(false);
   const [agentId, setAgentId] = useState("");
-  const [sessions, setSessions] = useState<TaggedSession[]>([]);
+  // Starts with the list remembered from last time, so the first frame after
+  // a launch or an iOS reload already shows the chats.
+  const [sessions, setSessions] = useState<TaggedSession[]>(loadCachedSessions);
+  const [hostFilter, setHostFilterState] = useState<HostFilter>(loadHostFilter);
+  const setHostFilter = useCallback((f: HostFilter) => {
+    setHostFilterState(f);
+    saveHostFilter(f);
+  }, []);
+  // A chat is being (re)loaded from its machine. Separate from busy (a turn
+  // is running): typing stays possible, the message goes out once loaded.
+  const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeHostId, setActiveHostId] = useState<string | null>(null);
   const [logWindow, setLogWindow] = useState(80);
@@ -566,18 +605,41 @@ export function App({ roam }: { roam: RoamClient }) {
     const conns = [...hostsRef.current.values()];
     if (conns.length === 0) return;
     const lists = await Promise.all(
-      conns.map(async (h) => {
+      conns.map(async (h): Promise<[string, TaggedSession[] | null]> => {
         try {
           const res = await withTimeout(h.agent.listSessions({}), PROBE_TIMEOUT_MS, h.name);
-          return (res.sessions ?? []).map((s) => ({ ...s, _host: h.endpointId }));
+          return [h.endpointId, (res.sessions ?? []).map((s) => ({ ...s, _host: h.endpointId }))];
         } catch (err) {
           console.warn(`listSessions failed for ${h.name}:`, err);
-          return [] as TaggedSession[];
+          return [h.endpointId, null];
         }
       }),
     );
-    setSessions(lists.flat());
+    // A machine that did not answer keeps its chats on screen.
+    setSessions((prev) => mergeHostLists(prev, new Map(lists)));
   }, []);
+
+  useEffect(() => {
+    if (sessions.length) saveCachedSessions(sessions);
+  }, [sessions]);
+
+  // Keep the open chat's tail for the next visit (and the next iOS reload).
+  const chatSnap = useRef<{ host: string; sid: string; items: Item[] } | null>(null);
+  const saveOpenChat = useCallback(() => {
+    const snap = chatSnap.current;
+    if (snap && snap.items.length) {
+      saveChat(snap.host, snap.sid, cacheableItems(snap.items as unknown as Array<{ kind: string } & Record<string, unknown>>));
+    }
+  }, []);
+  useEffect(() => {
+    if (!sessionId || !activeHostId || loading || items.length === 0) {
+      chatSnap.current = null;
+      return;
+    }
+    chatSnap.current = { host: activeHostId, sid: sessionId, items };
+    const t = setTimeout(saveOpenChat, 800);
+    return () => clearTimeout(t);
+  }, [items, sessionId, activeHostId, loading, saveOpenChat]);
 
   // Projects are ordinary ACP: sources/list with type "project" returns
   // slug + title; sessions carry projectId in _meta. Keyed "<host>:<slug>"
@@ -620,6 +682,7 @@ export function App({ roam }: { roam: RoamClient }) {
     setItems([]);
     setActiveRun(null);
     setBusy(false);
+    setLoading(false);
     setTurnStartedAt(null);
     setCancelling(false);
     setExternalActive(false);
@@ -642,6 +705,12 @@ export function App({ roam }: { roam: RoamClient }) {
     [],
   );
 
+  // Every known machine (connected or not) for the filter and the labels.
+  const hostChoices = [...hosts]
+    .sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId))
+    .map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }));
+  const activeFilter: HostFilter = hostChoices.some((h) => h.endpointId === hostFilter) ? hostFilter : "all";
+
   const newSession = useCallback(async (hostId?: string) => {
     const hid = hostId ?? connectedHosts()[0]?.endpointId ?? null;
     const host = hid ? hostsRef.current.get(hid) : null;
@@ -651,7 +720,14 @@ export function App({ roam }: { roam: RoamClient }) {
     const token = navToken.current;
     setCreating(true);
     try {
-      const res = await host.agent.newSession({ cwd: "/", mcpServers: [] });
+      // hostSubdir: the machine starts the chat in its "Vom iPhone gestartet"
+      // folder, which the desktop app shows as its own sidebar section.
+      // Machines without that patch ignore the hint.
+      const res = await host.agent.newSession({
+        cwd: "/",
+        mcpServers: [],
+        _meta: { hostSubdir: PHONE_FOLDER },
+      });
       if (navToken.current !== token) return;
       const opts = ((res as { configOptions?: unknown[] }).configOptions ?? []) as ConfigOption[];
       setConfigOptions(opts);
@@ -682,21 +758,38 @@ export function App({ roam }: { roam: RoamClient }) {
   const openSession = useCallback(
     async (hostId: string, id: string, force = false, keepExternalGuard = false) => {
       const host = hostsRef.current.get(hostId);
-      if (!host) return;
+      if (!host && force) return;
       if (id === sessionRef.current && hostId === activeHostRef.current && !force) return;
       // A user-initiated switch is a navigation; a follow-mode refresh of the
       // same chat is not, so a running turn there keeps its state.
       if (!force) {
         setPickHost(false);
         leaveSession();
+        // Show the remembered tail at once; the load below replaces it. A
+        // refresh (force) keeps what is on screen until the new copy is in,
+        // which is what made the chat blink every few seconds before.
+        const cached = loadChat(hostId, id);
+        setItems(cached ? fromCache(cached) : []);
+        setLogWindow(80);
       }
       const token = navToken.current;
-      setBusy(true);
+      if (!host) {
+        // Machine out of reach right now: keep the remembered chat on screen
+        // and load it as soon as the machine is back (see connect()).
+        localStorage.setItem(SESSION_KEY, `${hostId}|${id}`);
+        activeHostRef.current = hostId;
+        setActiveHostId(hostId);
+        sessionRef.current = id;
+        setSessionId(id);
+        pendingResync.current = id;
+        setLinkDown(true);
+        void checkLinksRef.current();
+        return;
+      }
+      setLoading(true);
       setStatus("loading session…");
       setStatusKind("busy");
       try {
-        setItems([]);
-        setLogWindow(80);
         activeRunRef.current = null;
         setActiveRun(null);
         // A follow-mode refresh must not clear the loop-boundary guard the
@@ -738,6 +831,7 @@ export function App({ roam }: { roam: RoamClient }) {
           });
         }
         setItems(buf);
+        saveChat(hostId, id, cacheableItems(buf as unknown as Array<{ kind: string } & Record<string, unknown>>));
         streamRole.current = null;
         setStatus("connected");
         setStatusKind("ok");
@@ -749,7 +843,7 @@ export function App({ roam }: { roam: RoamClient }) {
       } finally {
         if (navToken.current === token) {
           replayBuf.current = null;
-          setBusy(false);
+          setLoading(false);
           inputRef.current?.focus();
         }
       }
@@ -771,7 +865,7 @@ export function App({ roam }: { roam: RoamClient }) {
   useEffect(() => {
     if (!connected) return;
     const t = setInterval(async () => {
-      if (hostsRef.current.size === 0 || busy) return;
+      if (hostsRef.current.size === 0 || busy || loading) return;
       try {
         await refreshSessions();
         const sid = sessionRef.current;
@@ -796,7 +890,7 @@ export function App({ roam }: { roam: RoamClient }) {
       }
     }, 6000);
     return () => clearInterval(t);
-  }, [connected, busy, openSession, refreshSessions]);
+  }, [connected, busy, loading, openSession, refreshSessions]);
 
 
   // Dial one host and add it to the live set. The tab holds a connection per
@@ -824,7 +918,6 @@ export function App({ roam }: { roam: RoamClient }) {
     } catch {
       // already closed
     }
-    setSessions((xs) => xs.filter((s) => s._host !== eid));
     if (activeHostRef.current === eid && sessionRef.current) {
       pendingResync.current = sessionRef.current;
       navToken.current += 1;
@@ -832,6 +925,7 @@ export function App({ roam }: { roam: RoamClient }) {
       activeRunRef.current = null;
       setActiveRun(null);
       setBusy(false);
+      setLoading(false);
       setTurnStartedAt(null);
       setCancelling(false);
       setLinkDown(true);
@@ -1030,6 +1124,7 @@ export function App({ roam }: { roam: RoamClient }) {
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
+        saveOpenChat();
       } else if (hiddenAt) {
         const away = Date.now() - hiddenAt;
         hiddenAt = 0;
@@ -1051,7 +1146,7 @@ export function App({ roam }: { roam: RoamClient }) {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("pageshow", onPageShow);
     };
-  }, []);
+  }, [saveOpenChat]);
 
   // A send during an active run is a steer: the message is queued into the
   // running loop rather than starting a second one. Two ways to know a run is
@@ -1097,6 +1192,12 @@ export function App({ roam }: { roam: RoamClient }) {
     const text = el?.value.trim() ?? "";
     const files = pending;
     if (!sid || (!text && files.length === 0)) return;
+    if (loading) {
+      // Chat is still loading: keep the text, it goes out once loaded.
+      setAttachError("Chat wird noch geladen. Deine Nachricht geht gleich automatisch raus.");
+      sendWhenBack.current = true;
+      return;
+    }
     if (!agent) {
       // Link to the chat's machine is down: keep the text, push a redial.
       setAttachError("Verbindung wird neu aufgebaut. Deine Nachricht geht automatisch raus, sobald sie steht.");
@@ -1169,17 +1270,17 @@ export function App({ roam }: { roam: RoamClient }) {
       inputRef.current?.focus();
       }
     }
-  }, [busy, pending, push, refreshSessions, steer, activeAgent, externalActive, externalOverride]);
+  }, [busy, loading, pending, push, refreshSessions, steer, activeAgent, externalActive, externalOverride]);
 
   // Deliver what was typed during the outage once the chat is back and idle.
   // An effect, not a direct call after the reload: it runs after the render
   // that cleared the loading state, so send() sees the fresh state.
   useEffect(() => {
-    if (!sendWhenBack.current || linkDown || busy || !sessionId) return;
+    if (!sendWhenBack.current || linkDown || busy || loading || !sessionId) return;
     if (!activeHostId || !hostsRef.current.has(activeHostId)) return;
     sendWhenBack.current = false;
     void send();
-  }, [linkDown, busy, sessionId, activeHostId, send]);
+  }, [linkDown, busy, loading, sessionId, activeHostId, send]);
 
   // Stop the running turn. ACP cancel is a notification: the prompt call
   // itself returns (stopReason: cancelled), which runs send()'s cleanup.
@@ -1208,7 +1309,7 @@ export function App({ roam }: { roam: RoamClient }) {
     <div className="h-[100dvh] flex flex-col bg-background-primary text-text-primary pb-[env(safe-area-inset-bottom)]">
       <div className="flex items-center justify-between gap-2 px-3 md:px-4 py-2.5 bg-background-secondary shrink-0">
         <div className="flex items-center gap-2 shrink-0">
-          {connected && (
+          {(connected || reconnecting) && (
             <button
               id="sidebar-toggle"
               className="md:hidden text-text-secondary px-1"
@@ -1266,7 +1367,7 @@ export function App({ roam }: { roam: RoamClient }) {
         </div>
       </div>
 
-      {!connected && reconnecting ? (
+      {!connected && reconnecting && sessions.length === 0 ? (
         // Re-dialing a known host (boot restore / dropped connection): a
         // quiet holding screen instead of flashing the hosts page.
         <section id="reconnect-panel" className="flex-1 grid place-items-center p-6">
@@ -1281,7 +1382,7 @@ export function App({ roam }: { roam: RoamClient }) {
             </button>
           </div>
         </section>
-      ) : !connected || showHosts ? (
+      ) : (!connected && !reconnecting) || showHosts ? (
         <ConnectPanel
           hosts={hosts}
           addingHost={addingHost}
@@ -1318,8 +1419,11 @@ export function App({ roam }: { roam: RoamClient }) {
             >
               + Neuer Chat
             </button>
+            <div className="mx-3">
+              <HostFilterBar choices={hostChoices} sessions={sessions} value={activeFilter} onChange={setHostFilter} />
+            </div>
             <div id="session-list" className="overflow-y-auto flex flex-col">
-              {groupSessions(sessions, projects).map(({ key, label, sessions: group }) => (
+              {groupSessions(filterByHost(sessions, activeFilter), projects).map(({ key, label, sessions: group }) => (
                 <div key={key} className="flex flex-col">
                   {label !== null && (
                     <button
@@ -1358,8 +1462,8 @@ export function App({ roam }: { roam: RoamClient }) {
                       </div>
                       <div className="text-[11px] text-text-tertiary mt-0.5">
                         {relativeTime(s.updatedAt)}
-                        {hostsRef.current.size > 1 && (
-                          <span className="text-text-info"> · {hostsRef.current.get(s._host)?.name ?? s._host.slice(0, 6)}</span>
+                        {activeFilter === "all" && hostChoices.length > 1 && (
+                          <span className="text-text-info"> · {hostLabel(s._host, s._host.slice(0, 6))}</span>
                         )}
                       </div>
                     </button>
@@ -1380,6 +1484,9 @@ export function App({ roam }: { roam: RoamClient }) {
                 creating={creating}
                 onNew={(hid) => void newSession(hid)}
                 onOpen={(s) => { if (s._host) void openSession(s._host, s.sessionId); }}
+                filterChoices={hostChoices}
+                filter={activeFilter}
+                onFilter={setHostFilter}
               />
             ) : (
             <>
@@ -1587,6 +1694,12 @@ export function App({ roam }: { roam: RoamClient }) {
                     );
                 }
               })}
+              {loading && items.length > 0 && (
+                <div id="chat-refreshing" className="msg system self-center flex items-center gap-2 text-text-tertiary text-[11px]">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  aktualisiere…
+                </div>
+              )}
               {busy && (
                 <div className="msg system self-center flex items-center gap-2.5 text-text-secondary text-xs">
                   <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { type TaggedSession, groupSessions, sessionProjectId } from "./sessions";
+import {
+  type TaggedSession,
+  HOST_FILTER_KEY,
+  PHONE_FOLDER,
+  filterByHost,
+  groupSessions,
+  isPhoneStarted,
+  loadHostFilter,
+  mergeHostLists,
+  saveHostFilter,
+  sessionProjectId,
+} from "./sessions";
 
 const s = (id: string, host: string, meta?: Record<string, unknown>): TaggedSession =>
   ({ sessionId: id, cwd: "/", _host: host, ...(meta ? { _meta: meta } : {}) }) as TaggedSession;
@@ -59,5 +70,61 @@ describe("groupSessions", () => {
 
   it("keine Chats: keine Gruppen", () => {
     expect(groupSessions([], {})).toEqual([]);
+  });
+});
+
+describe("Handy-Rubrik und Rechner-Filter", () => {
+  const at = (id: string, host: string, cwd: string): TaggedSession =>
+    ({ sessionId: id, cwd, _host: host }) as TaggedSession;
+
+  it("erkennt Chats im Ordner 'Vom iPhone gestartet', auch mit Schraegstrich am Ende", () => {
+    expect(isPhoneStarted({ cwd: `/Users/m/${PHONE_FOLDER}` })).toBe(true);
+    expect(isPhoneStarted({ cwd: `/home/m/werkstatt/${PHONE_FOLDER}/` })).toBe(true);
+    expect(isPhoneStarted({ cwd: "/Users/m" })).toBe(false);
+    expect(isPhoneStarted({ cwd: `/Users/m/${PHONE_FOLDER}/unter` })).toBe(false);
+    expect(isPhoneStarted({})).toBe(false);
+  });
+
+  it("Handy-Chats bilden eine eigene Gruppe direkt nach 'chats'", () => {
+    const groups = groupSessions(
+      [
+        at("a", "mini", `/w/${PHONE_FOLDER}`),
+        at("b", "mini", "/w"),
+        { ...at("c", "mini", "/w"), _meta: { projectId: "p" } } as TaggedSession,
+        at("d", "book", `/Users/m/${PHONE_FOLDER}`),
+      ],
+      { "mini:p": "Projekt" },
+    );
+    expect(groups.map((g) => g.label)).toEqual(["chats", PHONE_FOLDER, "Projekt"]);
+    expect(groups[1].sessions.map((x) => x.sessionId)).toEqual(["a", "d"]);
+  });
+
+  it("filterByHost zeigt alle oder nur einen Rechner", () => {
+    const list = [at("1", "mini", "/"), at("2", "book", "/"), at("3", "mini", "/")];
+    expect(filterByHost(list, "all")).toHaveLength(3);
+    expect(filterByHost(list, "mini").map((x) => x.sessionId)).toEqual(["1", "3"]);
+    expect(filterByHost(list, "unbekannt")).toEqual([]);
+  });
+
+  it("Filter wird auf dem Geraet gemerkt, Standard ist 'all'", () => {
+    localStorage.removeItem(HOST_FILTER_KEY);
+    expect(loadHostFilter()).toBe("all");
+    saveHostFilter("book");
+    expect(loadHostFilter()).toBe("book");
+  });
+
+  it("mergeHostLists: ein Rechner ohne Antwort behaelt seine alten Chats", () => {
+    const prev = [at("alt-mini", "mini", "/"), at("alt-book", "book", "/")];
+    const fresh = new Map<string, TaggedSession[] | null>([
+      ["mini", [at("neu-mini", "mini", "/")]],
+      ["book", null],
+    ]);
+    expect(mergeHostLists(prev, fresh).map((x) => x.sessionId)).toEqual(["neu-mini", "alt-book"]);
+  });
+
+  it("mergeHostLists: Rechner, die gerade nicht verbunden sind, bleiben sichtbar", () => {
+    const prev = [at("x", "book", "/")];
+    const fresh = new Map<string, TaggedSession[] | null>([["mini", [at("y", "mini", "/")]]]);
+    expect(mergeHostLists(prev, fresh).map((x) => x.sessionId)).toEqual(["y", "x"]);
   });
 });

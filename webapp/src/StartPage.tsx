@@ -2,9 +2,8 @@
 // Replaces the session constellation as the landing view: on a phone the
 // first thing wanted is almost always "ask something new".
 import { Plus } from "lucide-react";
-import type { TaggedSession } from "./sessions";
-
-type HostChoice = { endpointId: string; label: string };
+import { filterByHost, isPhoneStarted, type HostFilter, type TaggedSession } from "./sessions";
+import { HostFilterBar, type HostChoice } from "./HostFilterBar";
 
 function ago(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -21,15 +20,26 @@ export function StartPage({
   creating,
   onNew,
   onOpen,
+  filterChoices = hosts,
+  filter = "all",
+  onFilter = () => {},
 }: {
+  /** Machines connected right now: one "new chat" button each. */
   hosts: HostChoice[];
   sessions: TaggedSession[];
   creating: boolean;
   onNew: (hostId: string) => void;
   onOpen: (s: TaggedSession) => void;
+  /** Every known machine, also the ones out of reach: filter and labels. */
+  filterChoices?: HostChoice[];
+  filter?: HostFilter;
+  onFilter?: (f: HostFilter) => void;
 }) {
-  const label = (eid: string) => hosts.find((h) => h.endpointId === eid)?.label ?? eid.slice(0, 6);
-  const recent = [...sessions]
+  const label = (eid: string) =>
+    filterChoices.find((h) => h.endpointId === eid)?.label ??
+    hosts.find((h) => h.endpointId === eid)?.label ??
+    eid.slice(0, 6);
+  const recent = filterByHost(sessions, filter)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
     .slice(0, 40);
   return (
@@ -56,6 +66,9 @@ export function StartPage({
         </div>
         <div className="flex flex-col">
           <div className="text-[11px] uppercase tracking-wide text-text-tertiary px-1 pb-1.5">Letzte Chats</div>
+          <div className="pb-2">
+            <HostFilterBar choices={filterChoices} sessions={sessions} value={filter} onChange={onFilter} />
+          </div>
           {recent.length === 0 && <div className="text-sm text-text-secondary px-1">noch keine</div>}
           {recent.map((s) => (
             <button
@@ -66,7 +79,10 @@ export function StartPage({
               <div className="text-[14px] truncate">{s.title || "(ohne Titel)"}</div>
               <div className="text-[11px] text-text-tertiary mt-0.5">
                 {ago(s.updatedAt)}
-                {hosts.length > 1 && <span className="text-text-info"> · {label(s._host)}</span>}
+                {filter === "all" && filterChoices.length > 1 && (
+                  <span className="text-text-info"> · {label(s._host)}</span>
+                )}
+                {isPhoneStarted(s) && <span className="text-text-tertiary"> · vom iPhone</span>}
               </div>
             </button>
           ))}
