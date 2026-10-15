@@ -17,6 +17,9 @@ Home-Bildschirm").
 | Knopf "Neu" nur in der Seitenleiste | "+ Neu" immer oben rechts, bei zwei Rechnern mit Auswahl |
 | nur ein Rechner wird beim Start verbunden | alle bekannten Rechner (Mac Mini und MacBook sind eingebaut) |
 | nur Text | Bueroklammer: Fotos und Dateien anhaengen (Bilder als Bild, alles andere als Datei) |
+| eine gemischte Chat-Liste | Filter "Alle / Mac Mini / MacBook" (Startseite und Seitenleiste, mit Anzahl, auf dem Geraet gemerkt) |
+| neue Chats im Arbeitsordner des Rechners | neue Chats im Unterordner "Vom iPhone gestartet"; die Mac-App zeigt ihn als eigene, aufklappbare Rubrik, die Handy-App als eigene Gruppe |
+| Chat-Liste und Verlauf nur aus der Verbindung | Chat-Liste und die letzten 15 geoeffneten Chats bleiben auf dem Handy gespeichert und stehen nach dem Oeffnen sofort da |
 
 Verbindung (seit 15.10.2026): iOS friert die App ein, sobald sie vom Bildschirm verschwindet, und
 die Verbindungen sterben dabei, ohne dass die App es merkt. Beim Zurueckkehren (und wenn das Netz
@@ -27,6 +30,22 @@ Daten). Der offene Chat bleibt stehen, wird nach dem Wiederverbinden neu geladen
 Zwischenzeit getippte Nachricht geht automatisch raus. Gemessen (Chrome ohne Fenster, iPhone-Ansicht,
 Netz 10 bzw. 60 s weg): Antwort 14 bis 20 s nach der Rueckkehr, vorher ging die Nachricht verloren.
 Kaltstart: erster Rechner 2 bis 3 s, beide 4 s.
+
+Zwischenspeicher (seit 15.10.2026, `cache.ts`): die Chat-Liste und das Ende der 15 zuletzt
+geoeffneten Chats (je 60 Eintraege) liegen im Browser-Speicher des Handys. Nach dem Oeffnen oder wenn
+iOS die App weggeworfen hat, steht die Liste sofort da, noch vor jeder Verbindung (gemessen 0,2 s,
+vorher 2 bis 4 s "connecting"); ein geoeffneter Chat zeigt sofort den gemerkten Stand und wird im
+Hintergrund aufgefrischt ("aktualisiere..."). Antwortet ein Rechner nicht, bleiben seine Chats in der
+Liste stehen, statt zu verschwinden. Das Nachladen eines Chats, den gerade ein anderes Geraet
+weiterfuehrt, leert den Bildschirm nicht mehr (das war das Flackern alle paar Sekunden). Waehrend
+ein Chat laedt, kann man schon tippen; die Nachricht geht raus, sobald er geladen ist.
+
+Ordner "Vom iPhone gestartet": ein neuer Chat schickt `_meta.hostSubdir` mit; der Fernzugang legt den
+Ordner im Arbeitsordner des Rechners an (MacBook `~/Vom iPhone gestartet`, Mini
+`~/werkstatt/Vom iPhone gestartet`). Das braucht den Patch `handy-ordner.patch` im Fernzugang-Bau
+(vibe-suite `agenten-umgebung/goose-fernzugang`); ohne ihn wird der Hinweis ignoriert. Derselbe Patch
+sorgt dafuer, dass ein Chat beim Oeffnen vom Handy in seinem Ordner bleibt (vorher wanderte er in den
+Arbeitsordner des Fernzugangs und verschwand aus seiner Rubrik in der Mac-App).
 
 Anhaenge: der Goose-Bau auf MacBook und Mac Mini (vibe-suite
 `agenten-umgebung/goose-fernzugang`, Patch `anhaenge-speichern`) speichert jede angehaengte
@@ -50,9 +69,11 @@ GitHub Pages liefert den Zweig `gh-pages` aus (ohne eigene Workflow-Datei).
 Die Tests liegen neben dem Code (`webapp/src/*.test.ts(x)`) und pruefen vor allem die Teile dieser
 Fassung: eingebaute Rechner und Verbindungs-Karten (`hosts.ts`), Anhaenge und Foto-Umrechnung
 (`attachments.ts`), Chat-Gruppen (`sessions.ts`), den Datenstrom zur Verbindung (`roam-stream.ts`)
-und die Startseite (`StartPage.tsx`). Netz, Verbindungs-Baustein und Bildverarbeitung des Browsers
+die Startseite mit Rechner-Filter (`StartPage.tsx`) und den Zwischenspeicher (`cache.ts`). Netz, Verbindungs-Baustein und Bildverarbeitung des Browsers
 werden dabei nachgestellt. Die Playwright-Skripte in `webapp/tests/` sind davon getrennt und
-brauchen einen laufenden Entwicklungs-Server.
+brauchen einen laufenden Entwicklungs-Server. Live gegen die echten Rechner: `tests/live-kaltstart.mjs`,
+`tests/live-pause.mjs`, `tests/live-filter-speicher.mjs` (Filter, Zwischenspeicher, neuer Chat im
+Handy-Ordner mit `NEU=macbook`).
 
 ## Sicherheit
 
