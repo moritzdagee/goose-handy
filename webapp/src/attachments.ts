@@ -110,3 +110,18 @@ export function attachmentBlocks(files: Attachment[]): ContentBlock[] {
     return { type: "resource", resource: { uri, mimeType: f.mime, blob: f.data } };
   });
 }
+
+// Prompt for one send: the typed text (left out when only files go), then
+// one block per attachment. An empty send still carries an empty text block
+// so the prompt is never an empty list.
+export function promptBlocks(text: string, files: Attachment[]): ContentBlock[] {
+  return [
+    ...(text || files.length === 0 ? [{ type: "text" as const, text: text || "" }] : []),
+    ...attachmentBlocks(files),
+  ];
+}
+
+// What the chat shows for the user's own message: text plus one line per file.
+export function promptPreview(text: string, files: Attachment[]): string {
+  return [text, ...files.map((f) => `\u{1F4CE} ${f.name}`)].filter(Boolean).join("\n");
+}

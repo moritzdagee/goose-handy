@@ -21,7 +21,7 @@ import jsQR from "jsqr";
 import { Button } from "@desktop/components/ui/button";
 import { ChevronDown, ChevronLeft, ChevronRight, Menu, Paperclip, Plus, SlidersHorizontal, Square, X } from "lucide-react";
 import { StartPage } from "./StartPage";
-import { readAttachment, attachmentBlocks, type Attachment } from "./attachments";
+import { readAttachment, promptBlocks, promptPreview, type Attachment } from "./attachments";
 import MarkdownContent from "@desktop/components/MarkdownContent";
 import { Goose } from "@desktop/components/icons/Goose";
 import { ToolCallStatusIndicator, type ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
@@ -940,11 +940,8 @@ export function App({ roam }: { roam: RoamClient }) {
     if (externalActive && !externalOverride) return;
     const runId = activeRunRef.current;
     if (busy && !runId) return;
-    const blocks = [
-      ...(text || files.length === 0 ? [{ type: "text" as const, text: text || "" }] : []),
-      ...attachmentBlocks(files),
-    ];
-    const shown = [text, ...files.map((f) => `📎 ${f.name}`)].filter(Boolean).join("\n");
+    const blocks = promptBlocks(text, files);
+    const shown = promptPreview(text, files);
     setPending([]);
     setAttachError(null);
     const token = navToken.current;
