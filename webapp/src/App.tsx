@@ -22,6 +22,14 @@ import { Button } from "@desktop/components/ui/button";
 import { ChevronDown, ChevronLeft, ChevronRight, Menu, Paperclip, Plus, SlidersHorizontal, Square, X } from "lucide-react";
 import { StartPage } from "./StartPage";
 import { readAttachment, promptBlocks, promptPreview, type Attachment } from "./attachments";
+import {
+  PROBE_TIMEOUT_MS,
+  RESUME_CHECK_AFTER_MS,
+  RESUME_REDIAL_AFTER_MS,
+  isPairingError,
+  retryDelay,
+  withTimeout,
+} from "./reconnect";
 import MarkdownContent from "@desktop/components/MarkdownContent";
 import { Goose } from "@desktop/components/icons/Goose";
 import { ToolCallStatusIndicator, type ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
@@ -260,7 +268,17 @@ export function App({ roam }: { roam: RoamClient }) {
   // the same consolidated workspace.
   const [showHosts, setShowHosts] = useState(false);
   const [hostName, setHostName] = useState("");
-  const resumeAfterDrop = useRef<string | null>(null);
+  // Chat that was open on a host whose link dropped: reloaded once that host
+  // is back. The chat stays on screen meanwhile (sessionRef is kept).
+  const pendingResync = useRef<string | null>(null);
+  // Hosts with a dial in flight, so resume checks and retries never stack.
+  const dialing = useRef<Set<string>>(new Set());
+  const [dialCount, setDialCount] = useState(0);
+  // The open chat's machine is unreachable right now; composer waits.
+  const [linkDown, setLinkDown] = useState(false);
+  // A message typed while the link was down goes out by itself once the
+  // chat is reloaded after the redial.
+  const sendWhenBack = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanStop = useRef<(() => void) | null>(null);
   // BarcodeDetector: Chrome/Android today; feature-detected so the button
@@ -383,9 +401,7 @@ export function App({ roam }: { roam: RoamClient }) {
     if (saved.length === 0) return;
     setCard(saved[0].card);
     setReconnecting(true);
-    void (async () => {
-      for (const h of saved) await connect(h.card);
-    })();
+    dialAllRef.current(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -552,7 +568,7 @@ export function App({ roam }: { roam: RoamClient }) {
     const lists = await Promise.all(
       conns.map(async (h) => {
         try {
-          const res = await h.agent.listSessions({});
+          const res = await withTimeout(h.agent.listSessions({}), PROBE_TIMEOUT_MS, h.name);
           return (res.sessions ?? []).map((s) => ({ ...s, _host: h.endpointId }));
         } catch (err) {
           console.warn(`listSessions failed for ${h.name}:`, err);
@@ -612,6 +628,9 @@ export function App({ roam }: { roam: RoamClient }) {
     setShowConfig(false);
     setPending([]);
     setAttachError(null);
+    pendingResync.current = null;
+    sendWhenBack.current = false;
+    setLinkDown(false);
     setStatus("connected");
     setStatusKind("ok");
     localStorage.removeItem(SESSION_KEY);
@@ -760,7 +779,7 @@ export function App({ roam }: { roam: RoamClient }) {
         if (!sid || !hid) return;
         const host = hostsRef.current.get(hid);
         if (!host) return;
-        const res = await host.agent.listSessions({});
+        const res = await withTimeout(host.agent.listSessions({}), PROBE_TIMEOUT_MS, host.name);
         const mine = (res.sessions ?? []).find((x) => x.sessionId === sid);
         const stamp = (mine as { updatedAt?: string } | undefined)?.updatedAt ?? null;
         const advanced =
@@ -772,7 +791,8 @@ export function App({ roam }: { roam: RoamClient }) {
         }
         if (stamp) lastSeenUpdate.current = stamp;
       } catch {
-        // transient; next tick
+        // No answer in time: find out which link is dead and redial it.
+        void checkLinksRef.current();
       }
     }, 6000);
     return () => clearInterval(t);
@@ -783,24 +803,86 @@ export function App({ roam }: { roam: RoamClient }) {
   // saved host — the session list is the merge — so connecting a second host
   // extends the workspace rather than replacing it.
   const reconnectAttempts = useRef<Map<string, number>>(new Map());
+  const connectRef = useRef<(cardText?: string) => Promise<void>>(async () => {});
+  const dialAllRef = useRef<(hosts: SavedHost[]) => void>(() => {});
+  // Bumped when the endpoint is thrown away: dials still running on the old
+  // one are stale, their result is discarded.
+  const dialGen = useRef(0);
+  const redialing = useRef(false);
+  const checkLinksRef = useRef<() => Promise<void>>(async () => {});
+  const redialAllRef = useRef<() => Promise<void>>(async () => {});
+
+  // Forget a host's connection (dead or dying) without leaving the open chat.
+  // A turn waiting on that link will never hear back, so its spinner is
+  // cleared here; the reload after redial shows what goose did meanwhile.
+  const dropHost = useCallback((eid: string) => {
+    const entry = hostsRef.current.get(eid);
+    if (!entry) return;
+    hostsRef.current.delete(eid);
+    try {
+      entry.conn.close();
+    } catch {
+      // already closed
+    }
+    setSessions((xs) => xs.filter((s) => s._host !== eid));
+    if (activeHostRef.current === eid && sessionRef.current) {
+      pendingResync.current = sessionRef.current;
+      navToken.current += 1;
+      replayBuf.current = null;
+      activeRunRef.current = null;
+      setActiveRun(null);
+      setBusy(false);
+      setTurnStartedAt(null);
+      setCancelling(false);
+      setLinkDown(true);
+    }
+    setStatus(`${hostLabel(eid, entry.name)}: Verbindung weg, verbinde neu…`);
+    setStatusKind("err");
+  }, []);
+
+  const scheduleReconnect = useCallback((text: string, eid: string) => {
+    const attempt = reconnectAttempts.current.get(eid) ?? 0;
+    reconnectAttempts.current.set(eid, attempt + 1);
+    // Hidden: iOS has frozen us anyway; the resume check redials on return.
+    if (document.visibilityState === "hidden") return;
+    setTimeout(() => {
+      if (hostsRef.current.has(eid) || document.visibilityState === "hidden") return;
+      void connectRef.current(text);
+    }, retryDelay(attempt));
+  }, []);
+
   const connect = useCallback(async (cardText?: string) => {
     const text = (cardText ?? card).trim();
     if (!text) return;
-    setStatus("dialing host over relay…");
-    setStatusKind("busy");
-    setBusy(true);
+    const hint = cardEndpointHint(text);
+    if (hint && (dialing.current.has(hint) || hostsRef.current.has(hint))) return;
+    if (hint) dialing.current.add(hint);
+    const gen = dialGen.current;
+    setDialCount((n) => n + 1);
+    if (hostsRef.current.size === 0) {
+      setStatus("dialing host over relay…");
+      setStatusKind("busy");
+    }
     try {
       const conn = await roam.connect(text, "web");
+      if (gen !== dialGen.current) {
+        conn.close();
+        return;
+      }
       // Key host state by the AUTHENTICATED endpoint id (QUIC-TLS-proven),
       // not agentId() — that's a host-chosen display label and could collide.
       const eid = conn.peerId();
       const bytes = roamByteStreams(conn);
       const stream = ndJsonStream(bytes.writable, bytes.readable);
       const agent = new GooseClient(() => makeClient(), stream);
-      await agent.initialize({
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-      });
+      await withTimeout(
+        agent.initialize({
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+        }),
+        PROBE_TIMEOUT_MS * 2,
+        "Anmeldung",
+      );
       localStorage.setItem(HOST_CARD_KEY, text);
       const prior = loadHosts().find((h) => h.endpointId === eid);
       const name = hostName.trim() || prior?.name || `host ${eid.slice(0, 8)}`;
@@ -810,32 +892,11 @@ export function App({ roam }: { roam: RoamClient }) {
         activeHostRef.current = eid;
         setActiveHostId(eid);
       }
-      // Per-host drop watch: reconnect this host with backoff. Other hosts'
-      // connections are untouched; if the open session lived here, resume it
-      // once the redial lands.
+      // Per-host drop watch: other hosts' connections are untouched.
       void agent.closed.then(() => {
         if (hostsRef.current.get(eid)?.agent !== agent) return;
-        hostsRef.current.delete(eid);
-        if (activeHostRef.current === eid) {
-          resumeAfterDrop.current = sessionRef.current;
-          sessionRef.current = null;
-        }
-        if (hostsRef.current.size === 0) setConnected(false);
-        setBusy(false);
-        setSessions((xs) => xs.filter((s) => s._host !== eid));
-        const attempt = reconnectAttempts.current.get(eid) ?? 0;
-        reconnectAttempts.current.set(eid, attempt + 1);
-        if (attempt < 8) {
-          const delay = Math.min(20000, 1500 * 2 ** attempt);
-          if (hostsRef.current.size === 0) setReconnecting(true);
-          setStatus(`${name}: connection lost — reconnecting…`);
-          setStatusKind("err");
-          setTimeout(() => void connect(text), delay);
-        } else {
-          setReconnecting(false);
-          setStatus(`${name}: connection lost — press connect`);
-          setStatusKind("err");
-        }
+        dropHost(eid);
+        scheduleReconnect(text, eid);
       });
       reconnectAttempts.current.delete(eid);
       setRelay(entry.relay);
@@ -855,41 +916,142 @@ export function App({ roam }: { roam: RoamClient }) {
       setStatusKind("ok");
       await refreshSessions();
       void refreshProjects();
-      const resume = resumeAfterDrop.current;
-      resumeAfterDrop.current = null;
-      if (resume && activeHostRef.current === eid) {
-        // recovering from a dropped connection mid-conversation: go back to it
-        await openSession(eid, resume, true);
+      const resync = pendingResync.current;
+      if (resync && activeHostRef.current === eid && sessionRef.current === resync) {
+        // Back after a drop with that machine's chat still open: reload it so
+        // whatever goose did meanwhile shows up, then free the composer.
+        pendingResync.current = null;
+        setLinkDown(false);
+        setAttachError(null);
+        await openSession(eid, resync, true);
         inputRef.current?.focus();
+
+      } else if (activeHostRef.current === eid) {
+        setLinkDown(false);
       }
-      // otherwise land on the session matrix (front page)
-      setBusy(false);
     } catch (err) {
       console.error(err);
-      setBusy(false);
-      const eid = cardEndpointHint(text);
-      const attempt = eid ? (reconnectAttempts.current.get(eid) ?? 0) : 0;
-      if (eid && attempt > 0 && attempt < 8) {
-        const delay = Math.min(20000, 1500 * 2 ** attempt);
-        reconnectAttempts.current.set(eid, attempt + 1);
-        setStatus("reconnecting…");
-        setStatusKind("err");
-        setTimeout(() => void connect(text), delay);
-      } else {
-        // Out of retries (or a first-time connect failed): fall back to the
-        // hosts page so the user can act.
-        setReconnecting(false);
-        setStatus(`connect failed: ${err}`);
-        setStatusKind("err");
-        // Not paired yet (fresh QR scan): open the pairing card — the user's
-        // next step is sending their own card to the host.
-        if (String(err).includes("not_allowlisted")) {
+      if (gen !== dialGen.current) return;
+      if (isPairingError(err)) {
+        // Not paired: redialing cannot help. Only take over the screen when
+        // nothing is connected; otherwise the other machine keeps working.
+        if (hostsRef.current.size === 0) {
+          setReconnecting(false);
+          setStatus(`connect failed: ${err}`);
+          setStatusKind("err");
           setAddingHost(true);
           setPairOpen(true);
         }
+      } else if (hint) {
+        if (hostsRef.current.size === 0 && (reconnectAttempts.current.get(hint) ?? 0) >= 2) {
+          // Nothing reachable after a few tries: show the hosts page with the
+          // reason, retries keep running behind it.
+          setReconnecting(false);
+          setStatus(`connect failed: ${err}`);
+          setStatusKind("err");
+        }
+        scheduleReconnect(text, hint);
+      } else {
+        setReconnecting(false);
+        setStatus(`connect failed: ${err}`);
+        setStatusKind("err");
       }
+    } finally {
+      if (hint && gen === dialGen.current) dialing.current.delete(hint);
+      setDialCount((n) => n - 1);
     }
-  }, [card, hostName, roam, makeClient, refreshSessions, refreshProjects, openSession]);
+  }, [card, hostName, roam, makeClient, refreshSessions, refreshProjects, openSession, dropHost, scheduleReconnect]);
+  connectRef.current = connect;
+
+  // First machine alone until it answers (at most 3 s), then the rest in
+  // parallel: dials racing on a freshly bound endpoint sometimes hung for two
+  // minutes, while a sleeping MacBook must not hold up the Mini either.
+  const dialAll = useCallback((list: SavedHost[]) => {
+    const sorted = [...list].sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId));
+    if (sorted.length === 0) return;
+    const [first, ...rest] = sorted;
+    const firstDone = connectRef.current(first.card);
+    void Promise.race([firstDone, new Promise((r) => setTimeout(r, 3000))]).then(() => {
+      for (const h of rest) void connectRef.current(h.card);
+    });
+  }, []);
+  dialAllRef.current = dialAll;
+
+  // Start over: drop every connection, bind a fresh endpoint, dial everyone.
+  // Needed after the network went away; the old endpoint keeps dead relay
+  // sockets and new dials through it complete but carry no data.
+  const redialAll = useCallback(async () => {
+    if (redialing.current) return;
+    redialing.current = true;
+    try {
+      for (const eid of [...hostsRef.current.keys()]) dropHost(eid);
+      dialGen.current += 1;
+      dialing.current.clear();
+      await roam.reset();
+      const saved = loadHosts();
+      for (const h of saved) reconnectAttempts.current.set(h.endpointId, 0);
+      dialAll(saved);
+    } finally {
+      redialing.current = false;
+    }
+  }, [roam, dropHost, dialAll]);
+
+  // Ask every live host a cheap question with a deadline. Any silence means
+  // the endpoint is suspect: start over. Saved hosts that are not live are
+  // dialed too (their retries pause while the app is in the background).
+  const checkLinks = useCallback(async () => {
+    const live = [...hostsRef.current.values()];
+    const results = await Promise.all(
+      live.map((h) =>
+        withTimeout(h.agent.listSessions({}), PROBE_TIMEOUT_MS, h.name).then(
+          () => true,
+          () => hostsRef.current.get(h.endpointId)?.agent !== h.agent,
+        ),
+      ),
+    );
+    if (results.some((ok) => !ok)) {
+      await redialAll();
+      return;
+    }
+    const missing = loadHosts().filter(
+      (h) => !hostsRef.current.has(h.endpointId) && !dialing.current.has(h.endpointId),
+    );
+    for (const h of missing) reconnectAttempts.current.set(h.endpointId, 0);
+    if (missing.length) dialAll(missing);
+    void refreshSessions();
+  }, [redialAll, dialAll, refreshSessions]);
+  redialAllRef.current = redialAll;
+  checkLinksRef.current = checkLinks;
+
+  // iOS freezes the app when it leaves the screen; check the links on return
+  // and whenever the network comes back.
+  useEffect(() => {
+    let hiddenAt = document.visibilityState === "hidden" ? Date.now() : 0;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt) {
+        const away = Date.now() - hiddenAt;
+        hiddenAt = 0;
+        // Long away: iOS has surely cut the sockets, skip the 5 s probe.
+        if (away >= RESUME_REDIAL_AFTER_MS) void redialAllRef.current();
+        else if (away >= RESUME_CHECK_AFTER_MS) void checkLinksRef.current();
+      }
+    };
+    // Network came back (or switched): every path is stale.
+    const onOnline = () => void redialAllRef.current();
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void checkLinksRef.current();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
 
   // A send during an active run is a steer: the message is queued into the
   // running loop rather than starting a second one. Two ways to know a run is
@@ -934,7 +1096,14 @@ export function App({ roam }: { roam: RoamClient }) {
     const el = inputRef.current;
     const text = el?.value.trim() ?? "";
     const files = pending;
-    if (!agent || !sid || (!text && files.length === 0)) return;
+    if (!sid || (!text && files.length === 0)) return;
+    if (!agent) {
+      // Link to the chat's machine is down: keep the text, push a redial.
+      setAttachError("Verbindung wird neu aufgebaut. Deine Nachricht geht automatisch raus, sobald sie steht.");
+      sendWhenBack.current = true;
+      void checkLinksRef.current();
+      return;
+    }
     // Loop-boundary guard: a foreign process is driving this session and the
     // user hasn't explicitly overridden — don't start a second loop.
     if (externalActive && !externalOverride) return;
@@ -1001,6 +1170,16 @@ export function App({ roam }: { roam: RoamClient }) {
       }
     }
   }, [busy, pending, push, refreshSessions, steer, activeAgent, externalActive, externalOverride]);
+
+  // Deliver what was typed during the outage once the chat is back and idle.
+  // An effect, not a direct call after the reload: it runs after the render
+  // that cleared the loading state, so send() sees the fresh state.
+  useEffect(() => {
+    if (!sendWhenBack.current || linkDown || busy || !sessionId) return;
+    if (!activeHostId || !hostsRef.current.has(activeHostId)) return;
+    sendWhenBack.current = false;
+    void send();
+  }, [linkDown, busy, sessionId, activeHostId, send]);
 
   // Stop the running turn. ACP cancel is a notification: the prompt call
   // itself returns (stopReason: cancelled), which runs send()'s cleanup.
@@ -1107,7 +1286,7 @@ export function App({ roam }: { roam: RoamClient }) {
           hosts={hosts}
           addingHost={addingHost}
           connected={connected}
-          busy={busy}
+          busy={dialCount > 0}
           card={card}
           hostName={hostName}
           canScan={canScan}
@@ -1437,6 +1616,17 @@ export function App({ roam }: { roam: RoamClient }) {
                 void send();
               }}
             >
+              {linkDown && (
+                <div
+                  id="link-down"
+                  className="max-w-3xl mx-auto w-full mb-1.5 flex items-center gap-2 text-[11px] text-text-warning rounded-lg bg-background-secondary px-3 py-1.5"
+                >
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
+                  <span className="flex-1 min-w-0">
+                    Verbindung zu {activeHostId ? hostLabel(activeHostId, "") : "dem Rechner"} wird wiederhergestellt… Goose arbeitet dort weiter.
+                  </span>
+                </div>
+              )}
               {externalActive && !externalOverride && (
                 <div
                   id="external-run-guard"

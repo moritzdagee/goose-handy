@@ -18,6 +18,16 @@ Home-Bildschirm").
 | nur ein Rechner wird beim Start verbunden | alle bekannten Rechner (Mac Mini und MacBook sind eingebaut) |
 | nur Text | Bueroklammer: Fotos und Dateien anhaengen (Bilder als Bild, alles andere als Datei) |
 
+Verbindung (seit 15.10.2026): iOS friert die App ein, sobald sie vom Bildschirm verschwindet, und
+die Verbindungen sterben dabei, ohne dass die App es merkt. Beim Zurueckkehren (und wenn das Netz
+wiederkommt) fragt die App jeden Rechner mit 5 Sekunden Frist; nach mehr als 10 Sekunden Pause
+baut sie gleich alles neu auf, inklusive eines frischen Verbindungs-Bausteins (`RoamClient.reset()`
+im wasm-Teil: nach einem Netzausfall kamen ueber den alten zwar Verbindungen zustande, aber keine
+Daten). Der offene Chat bleibt stehen, wird nach dem Wiederverbinden neu geladen, und eine in der
+Zwischenzeit getippte Nachricht geht automatisch raus. Gemessen (Chrome ohne Fenster, iPhone-Ansicht,
+Netz 10 bzw. 60 s weg): Antwort 14 bis 20 s nach der Rueckkehr, vorher ging die Nachricht verloren.
+Kaltstart: erster Rechner 2 bis 3 s, beide 4 s.
+
 Anhaenge: der Goose-Bau auf MacBook und Mac Mini (vibe-suite
 `agenten-umgebung/goose-fernzugang`, Patch `anhaenge-speichern`) speichert jede angehaengte
 Datei und legt eine Kopie nach `~/in-die-datenbank/goose/`, von dort kommt sie in die
