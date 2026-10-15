@@ -32,6 +32,18 @@ Pixel) umgerechnet, Dateien bis 25 MB.
 
 GitHub Pages liefert den Zweig `gh-pages` aus (ohne eigene Workflow-Datei).
 
+## Tests
+
+    cd webapp && npm ci && npm test       # Vitest, rund 20 Sekunden, ohne Netz und ohne Rechner
+    cd webapp && npm run typecheck        # braucht den Verbindungs-Baustein in src/wasm (build-web.sh)
+
+Die Tests liegen neben dem Code (`webapp/src/*.test.ts(x)`) und pruefen vor allem die Teile dieser
+Fassung: eingebaute Rechner und Verbindungs-Karten (`hosts.ts`), Anhaenge und Foto-Umrechnung
+(`attachments.ts`), Chat-Gruppen (`sessions.ts`), den Datenstrom zur Verbindung (`roam-stream.ts`)
+und die Startseite (`StartPage.tsx`). Netz, Verbindungs-Baustein und Bildverarbeitung des Browsers
+werden dabei nachgestellt. Die Playwright-Skripte in `webapp/tests/` sind davon getrennt und
+brauchen einen laufenden Entwicklungs-Server.
+
 ## Sicherheit
 
 Die App selbst enthaelt keine Geheimnisse. Jeder Browser erzeugt beim ersten Start einen eigenen
