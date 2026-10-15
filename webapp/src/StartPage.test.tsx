@@ -32,6 +32,17 @@ const recentTitles = () =>
   [...document.querySelectorAll(".recent-chat")].map((el) => el.querySelector("div")!.textContent);
 
 describe("StartPage", () => {
+  it("zeigt 'Verbinde…' statt leerer Knoepfe, solange kein Rechner verbunden ist", () => {
+    setup({ hosts: [] });
+    expect(document.getElementById("start-connecting")?.textContent).toContain("Verbinde");
+    expect(document.querySelectorAll(".new-chat-btn")).toHaveLength(0);
+  });
+
+  it("blendet 'Verbinde…' aus, sobald ein Rechner da ist", () => {
+    setup({ hosts: [MINI] });
+    expect(document.getElementById("start-connecting")).toBeNull();
+  });
+
   it("je verbundenem Rechner ein Knopf 'Neuer Chat', der den richtigen Rechner meldet", () => {
     const { onNew } = setup();
     fireEvent.click(screen.getByText("Neuer Chat auf MacBook"));

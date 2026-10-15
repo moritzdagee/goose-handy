@@ -15,7 +15,6 @@ use iroh::{
     TransportAddr,
 };
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::sync::Arc;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use wasm_bindgen::prelude::*;
@@ -206,10 +205,12 @@ pub struct RoamClient {
     // for every host connection. A second endpoint bound to the same secret
     // would register the same endpoint id on the shared relays, letting the
     // newer registration hijack relay routing and break the first host's
-    // traffic — so all connections share this one. wasm is single-threaded,
-    // so a RefCell is sufficient. Mirrors the native RoamingNode, which owns
-    // a single Endpoint and dials all peers through it.
-    endpoint: RefCell<Option<Endpoint>>,
+    // traffic — so all connections share this one. An async lock, not a
+    // RefCell: two dials started together (the app dials every saved host in
+    // parallel) would otherwise both see "no endpoint yet" across the bind
+    // await and bind two. Mirrors the native RoamingNode, which owns a single
+    // Endpoint and dials all peers through it.
+    endpoint: futures::lock::Mutex<Option<Endpoint>>,
 }
 
 #[wasm_bindgen]
@@ -228,7 +229,7 @@ impl RoamClient {
         };
         Ok(RoamClient {
             secret,
-            endpoint: RefCell::new(None),
+            endpoint: futures::lock::Mutex::new(None),
         })
     }
 
@@ -270,7 +271,10 @@ impl RoamClient {
     /// re-register the same id and hijack relay routing for already-connected
     /// hosts.
     async fn ensure_endpoint(&self, relay_urls: &[String]) -> Result<Endpoint, JsValue> {
-        if let Some(ep) = self.endpoint.borrow().as_ref() {
+        // Held across the bind, so a concurrent dial waits for this endpoint
+        // instead of binding a second one.
+        let mut slot = self.endpoint.lock().await;
+        if let Some(ep) = slot.as_ref() {
             return Ok(ep.clone());
         }
         let ep = Endpoint::builder(Minimal)
@@ -279,8 +283,25 @@ impl RoamClient {
             .bind()
             .await
             .map_err(|e| js_err(format!("bind endpoint: {e}")))?;
-        *self.endpoint.borrow_mut() = Some(ep.clone());
+        *slot = Some(ep.clone());
         Ok(ep)
+    }
+
+    /// Throw the shared endpoint away; the next dial binds a fresh one with
+    /// the same identity. After the network drops (a phone leaving the screen,
+    /// switching between Wi-Fi and mobile data) the old endpoint keeps stale
+    /// relay sockets: new dials still complete the handshake but no data
+    /// flows. All connections made through the old endpoint are dead after
+    /// this, so callers redial every host. The old endpoint is closed in the
+    /// background: closing waits for its connections, which may never answer.
+    #[wasm_bindgen]
+    pub async fn reset(&self) {
+        let old = self.endpoint.lock().await.take();
+        if let Some(ep) = old {
+            spawn_local(async move {
+                ep.close().await;
+            });
+        }
     }
 
     /// Dial a host from its `goose+roam://` card, run the roam handshake, and

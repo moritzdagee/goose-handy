@@ -47,6 +47,11 @@ export function StartPage({
               <Plus className="w-5 h-5" /> Neuer Chat auf {h.label}
             </button>
           ))}
+          {hosts.length === 0 && (
+            <div id="start-connecting" className="text-sm text-text-secondary self-center py-3">
+              Verbinde mit deinen Rechnern…
+            </div>
+          )}
           {creating && <div className="text-xs text-text-secondary self-center">Chat wird angelegt…</div>}
         </div>
         <div className="flex flex-col">
