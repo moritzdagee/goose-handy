@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TimeoutError, isPairingError, retryDelay, withTimeout } from "./reconnect";
+import {
+  LOAD_TIMEOUT_MS,
+  PROBE_TIMEOUT_MS,
+  TimeoutError,
+  isPairingError,
+  retryDelay,
+  withTimeout,
+} from "./reconnect";
 
 describe("retryDelay", () => {
   it("redials at once, then backs off 1, 2, 4, 8 s", () => {
@@ -44,6 +51,27 @@ describe("withTimeout", () => {
     settle("ok");
     await expect(p).resolves.toBe("ok");
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("chat load deadline", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("gives a chat load more time than a link probe", () => {
+    expect(LOAD_TIMEOUT_MS).toBeGreaterThan(PROBE_TIMEOUT_MS);
+  });
+
+  it("ends a load that never answers instead of leaving the chat blank", async () => {
+    vi.useFakeTimers();
+    const stuckLoad = new Promise<unknown>(() => {});
+    const p = withTimeout(stuckLoad, LOAD_TIMEOUT_MS, "MacBook");
+    vi.advanceTimersByTime(LOAD_TIMEOUT_MS - 1);
+    let settled = false;
+    p.catch(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    vi.advanceTimersByTime(1);
+    await expect(p).rejects.toBeInstanceOf(TimeoutError);
   });
 });
 

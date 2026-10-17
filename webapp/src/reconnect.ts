@@ -9,6 +9,11 @@
 // gone. Healthy round trips over the relay take well under a second.
 export const PROBE_TIMEOUT_MS = 5000;
 
+// Opening a chat replays its last turns. Even a long tail arrives in a few
+// seconds; a load still silent after this is stuck on a half-dead link, and
+// without a deadline the screen stayed blank on "Chat wird noch geladen".
+export const LOAD_TIMEOUT_MS = 20000;
+
 // Away from the screen for at least this long: check the links on return.
 export const RESUME_CHECK_AFTER_MS = 3000;
 
