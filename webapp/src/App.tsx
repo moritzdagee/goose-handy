@@ -52,7 +52,7 @@ import {
   loadCollapsed,
 } from "./hosts";
 import {
-  PHONE_FOLDER,
+  newSessionMeta,
   filterByHost,
   groupSessions,
   loadHostFilter,
@@ -724,11 +724,12 @@ export function App({ roam }: { roam: RoamClient }) {
     try {
       // hostSubdir: the machine starts the chat in its "Vom iPhone gestartet"
       // folder, which the desktop app shows as its own sidebar section.
-      // Machines without that patch ignore the hint.
+      // Machines without that patch ignore the hint. client: stored as a user
+      // chat, so the desktop app lists it at all.
       const res = await host.agent.newSession({
         cwd: "/",
         mcpServers: [],
-        _meta: { hostSubdir: PHONE_FOLDER },
+        _meta: newSessionMeta(),
       });
       if (navToken.current !== token) return;
       const opts = ((res as { configOptions?: unknown[] }).configOptions ?? []) as ConfigOption[];

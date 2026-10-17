@@ -10,6 +10,16 @@ export type TaggedSession = SessionInfo & { _host: string };
 // sidebar by folder, so these chats get their own collapsible section there.
 export const PHONE_FOLDER = "Vom iPhone gestartet";
 
+// Name the phone app sends as _meta.client on session/new. goose stores a chat
+// opened by a named client as an ordinary "user" chat; without it the chat is
+// typed "acp", and the desktop app leaves acp chats out of its sidebar, so the
+// "Vom iPhone gestartet" section never showed up there (17.10.2026).
+export const PHONE_CLIENT = "goose-handy";
+
+export function newSessionMeta(): { hostSubdir: string; client: string } {
+  return { hostSubdir: PHONE_FOLDER, client: PHONE_CLIENT };
+}
+
 export function isPhoneStarted(s: { cwd?: string | null }): boolean {
   const parts = (s.cwd ?? "").replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] === PHONE_FOLDER;
