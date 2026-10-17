@@ -23,7 +23,9 @@ import { ChevronDown, ChevronLeft, ChevronRight, Menu, Paperclip, Plus, SlidersH
 import { StartPage } from "./StartPage";
 import { readAttachment, promptBlocks, promptPreview, type Attachment } from "./attachments";
 import {
+  LOAD_TIMEOUT_MS,
   PROBE_TIMEOUT_MS,
+  TimeoutError,
   RESUME_CHECK_AFTER_MS,
   RESUME_REDIAL_AFTER_MS,
   isPairingError,
@@ -813,12 +815,16 @@ export function App({ roam }: { roam: RoamClient }) {
         // Ask the server to replay only the trailing messages (it rounds up
         // to a turn boundary); replaySkipped in the response meta says how
         // much older history was left out.
-        const res = await host.agent.loadSession({
-          sessionId: id,
-          cwd: "/",
-          mcpServers: [],
-          _meta: { replayTail: REPLAY_TAIL },
-        });
+        const res = await withTimeout(
+          host.agent.loadSession({
+            sessionId: id,
+            cwd: "/",
+            mcpServers: [],
+            _meta: { replayTail: REPLAY_TAIL },
+          }),
+          LOAD_TIMEOUT_MS,
+          host.name,
+        );
         if (navToken.current !== token) return;
         const buf = replayBuf.current ?? [];
         replayBuf.current = null;
@@ -837,6 +843,13 @@ export function App({ roam }: { roam: RoamClient }) {
         setStatusKind("ok");
       } catch (err) {
         if (navToken.current !== token) return;
+        if (err instanceof TimeoutError) {
+          // The link answers nothing: start over. redialAll drops every host
+          // (dropHost frees the screen and marks this chat for reload),
+          // connect() reloads it and a message typed meanwhile goes out after.
+          void redialAllRef.current();
+          return;
+        }
         push({ kind: "system", text: `could not load session: ${err}` } as Omit<Item, "id">);
         setStatus("connected");
         setStatusKind("ok");
