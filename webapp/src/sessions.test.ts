@@ -3,6 +3,8 @@ import {
   type TaggedSession,
   HOST_FILTER_KEY,
   PHONE_FOLDER,
+  PHONE_CLIENT,
+  newSessionMeta,
   filterByHost,
   groupSessions,
   isPhoneStarted,
@@ -126,5 +128,12 @@ describe("Handy-Rubrik und Rechner-Filter", () => {
     const prev = [at("x", "book", "/")];
     const fresh = new Map<string, TaggedSession[] | null>([["mini", [at("y", "mini", "/")]]]);
     expect(mergeHostLists(prev, fresh).map((x) => x.sessionId)).toEqual(["y", "x"]);
+  });
+});
+
+describe("newSessionMeta", () => {
+  it("asks for the phone folder and names the client, so the desktop app lists the chat", () => {
+    expect(newSessionMeta()).toEqual({ hostSubdir: PHONE_FOLDER, client: PHONE_CLIENT });
+    expect(PHONE_CLIENT.trim()).not.toBe("");
   });
 });
