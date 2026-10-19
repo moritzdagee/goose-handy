@@ -154,3 +154,37 @@ describe("StartPage", () => {
     });
   });
 });
+
+describe("StartPage Archiv-Filter", () => {
+  const archived = (id: string, host: string, title: string) =>
+    ({ ...sess(id, host, title, minsAgo(5)), _meta: { archivedAt: minsAgo(1) } }) as TaggedSession;
+
+  it("zeigt standardmaessig nur aktive Chats, Zahlen je Reiter", () => {
+    setup({ sessions: [sess("1", "mini-id", "Offen", minsAgo(2)), archived("2", "mini-id", "Alt")] });
+    expect(recentTitles()).toEqual(["Offen"]);
+    const tabs = [...document.querySelectorAll(".archive-filter [role=tab]")].map((t) => t.textContent);
+    expect(tabs).toEqual(["Aktiv 1", "Archiviert 1", "Alle 2"]);
+  });
+
+  it("zeigt archivierte Chats, wenn so gewaehlt, und meldet die Wahl", () => {
+    const onArchiveFilter = vi.fn();
+    setup({
+      sessions: [sess("1", "mini-id", "Offen", minsAgo(2)), archived("2", "mini-id", "Alt")],
+      archiveFilter: "archived",
+      onArchiveFilter,
+    });
+    expect(recentTitles()).toEqual(["Alt"]);
+    fireEvent.click(document.querySelector('.archive-filter [data-filter="all"]')!);
+    expect(onArchiveFilter).toHaveBeenCalledWith("all");
+  });
+
+  it("zaehlt nur Chats des gewaehlten Rechners", () => {
+    setup({
+      sessions: [sess("1", "mini-id", "Mini", minsAgo(2)), archived("2", "book-id", "Book alt")],
+      filterChoices: [MINI, BOOK],
+      filter: "mini-id",
+    });
+    const tabs = [...document.querySelectorAll(".archive-filter [role=tab]")].map((t) => t.textContent);
+    expect(tabs).toEqual(["Aktiv 1", "Archiviert 0", "Alle 1"]);
+  });
+});

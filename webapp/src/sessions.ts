@@ -55,6 +55,62 @@ export function filterByHost<T extends { _host: string }>(sessions: T[], filter:
   return filter === "all" ? sessions : sessions.filter((s) => s._host === filter);
 }
 
+// "Aktiv | Archiviert | Alle": goose lists archived chats too (with
+// _meta.archivedAt); without this second filter the list grows endlessly.
+// Kept per device, starts on "active".
+export type ArchiveFilter = "active" | "archived" | "all";
+export const ARCHIVE_FILTER_KEY = "goose-handy-archive-filter";
+
+export function isArchived(s: { _meta?: unknown }): boolean {
+  const meta = s._meta as Record<string, unknown> | null | undefined;
+  return typeof meta?.archivedAt === "string" && meta.archivedAt !== "";
+}
+
+export function filterByArchive<T extends { _meta?: unknown }>(sessions: T[], filter: ArchiveFilter): T[] {
+  if (filter === "all") return sessions;
+  return sessions.filter((s) => isArchived(s) === (filter === "archived"));
+}
+
+export function loadArchiveFilter(): ArchiveFilter {
+  try {
+    const v = localStorage.getItem(ARCHIVE_FILTER_KEY);
+    return v === "archived" || v === "all" ? v : "active";
+  } catch {
+    return "active";
+  }
+}
+
+export function saveArchiveFilter(f: ArchiveFilter): void {
+  try {
+    localStorage.setItem(ARCHIVE_FILTER_KEY, f);
+  } catch {
+    // best effort
+  }
+}
+
+// goose answers session/list in pages (50 on the MacBook, archived chats
+// included) with a nextCursor. Reading only the first page hid every chat
+// behind the 50 newest (18.10.2026). All pages are read, each with its own
+// deadline, so one slow page fails the whole list instead of showing half.
+export const MAX_LIST_PAGES = 40;
+
+export async function listAllSessions(
+  list: (cursor?: string) => Promise<{ sessions?: SessionInfo[] | null; nextCursor?: string | null }>,
+): Promise<SessionInfo[]> {
+  const all: SessionInfo[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const res = await list(cursor);
+    all.push(...(res.sessions ?? []));
+    const next = res.nextCursor ?? undefined;
+    if (!next || seen.has(next)) break;
+    seen.add(next);
+    cursor = next;
+  }
+  return all;
+}
+
 // New per-host lists merged into what is on screen. A host whose list could
 // not be fetched (null) keeps its previous entries instead of vanishing: a
 // slow answer after the phone wakes up must not empty the sidebar.
