@@ -2,7 +2,8 @@
 // Replaces the session constellation as the landing view: on a phone the
 // first thing wanted is almost always "ask something new".
 import { Plus } from "lucide-react";
-import { filterByHost, isPhoneStarted, type HostFilter, type TaggedSession } from "./sessions";
+import { filterByArchive, filterByHost, isPhoneStarted, type ArchiveFilter, type HostFilter, type TaggedSession } from "./sessions";
+import { ArchiveFilterBar } from "./ArchiveFilterBar";
 import { HostFilterBar, type HostChoice } from "./HostFilterBar";
 
 function ago(iso: string | null | undefined): string {
@@ -23,6 +24,8 @@ export function StartPage({
   filterChoices = hosts,
   filter = "all",
   onFilter = () => {},
+  archiveFilter = "active",
+  onArchiveFilter = () => {},
 }: {
   /** Machines connected right now: one "new chat" button each. */
   hosts: HostChoice[];
@@ -34,12 +37,15 @@ export function StartPage({
   filterChoices?: HostChoice[];
   filter?: HostFilter;
   onFilter?: (f: HostFilter) => void;
+  archiveFilter?: ArchiveFilter;
+  onArchiveFilter?: (f: ArchiveFilter) => void;
 }) {
   const label = (eid: string) =>
     filterChoices.find((h) => h.endpointId === eid)?.label ??
     hosts.find((h) => h.endpointId === eid)?.label ??
     eid.slice(0, 6);
-  const recent = filterByHost(sessions, filter)
+  const onHost = filterByHost(sessions, filter);
+  const recent = filterByArchive(onHost, archiveFilter)
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
     .slice(0, 40);
   return (
@@ -66,8 +72,9 @@ export function StartPage({
         </div>
         <div className="flex flex-col">
           <div className="text-[11px] uppercase tracking-wide text-text-tertiary px-1 pb-1.5">Letzte Chats</div>
-          <div className="pb-2">
+          <div className="pb-2 flex flex-col gap-1.5">
             <HostFilterBar choices={filterChoices} sessions={sessions} value={filter} onChange={onFilter} />
+            <ArchiveFilterBar sessions={onHost} value={archiveFilter} onChange={onArchiveFilter} />
           </div>
           {recent.length === 0 && <div className="text-sm text-text-secondary px-1">noch keine</div>}
           {recent.map((s) => (

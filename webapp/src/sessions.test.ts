@@ -9,6 +9,12 @@ import {
   groupSessions,
   isPhoneStarted,
   loadHostFilter,
+  ARCHIVE_FILTER_KEY,
+  filterByArchive,
+  isArchived,
+  listAllSessions,
+  loadArchiveFilter,
+  saveArchiveFilter,
   mergeHostLists,
   saveHostFilter,
   sessionProjectId,
@@ -135,5 +141,76 @@ describe("newSessionMeta", () => {
   it("asks for the phone folder and names the client, so the desktop app lists the chat", () => {
     expect(newSessionMeta()).toEqual({ hostSubdir: PHONE_FOLDER, client: PHONE_CLIENT });
     expect(PHONE_CLIENT.trim()).not.toBe("");
+  });
+});
+
+describe("Archiv-Filter", () => {
+  const s = (id: string, archivedAt?: string | null) =>
+    ({ sessionId: id, _host: "h", _meta: archivedAt === undefined ? {} : { archivedAt } }) as never;
+
+  it("erkennt archivierte Chats am Zeitstempel von goose", () => {
+    expect(isArchived(s("a", "2026-10-17T16:10:00Z"))).toBe(true);
+    expect(isArchived(s("b"))).toBe(false);
+    expect(isArchived(s("c", null))).toBe(false);
+    expect(isArchived(s("d", ""))).toBe(false);
+    expect(isArchived({ sessionId: "e" } as never)).toBe(false);
+  });
+
+  it("zeigt aktiv, archiviert oder alle", () => {
+    const list = [s("a", "2026-10-17T16:10:00Z"), s("b"), s("c")];
+    const ids = (xs: { sessionId: string }[]) => xs.map((x) => x.sessionId);
+    expect(ids(filterByArchive(list, "active"))).toEqual(["b", "c"]);
+    expect(ids(filterByArchive(list, "archived"))).toEqual(["a"]);
+    expect(ids(filterByArchive(list, "all"))).toEqual(["a", "b", "c"]);
+  });
+
+  it("merkt sich die Wahl und startet auf aktiv", () => {
+    localStorage.removeItem(ARCHIVE_FILTER_KEY);
+    expect(loadArchiveFilter()).toBe("active");
+    saveArchiveFilter("archived");
+    expect(loadArchiveFilter()).toBe("archived");
+    localStorage.setItem(ARCHIVE_FILTER_KEY, "quatsch");
+    expect(loadArchiveFilter()).toBe("active");
+  });
+});
+
+describe("listAllSessions", () => {
+  const page = (ids: string[], nextCursor?: string) => ({
+    sessions: ids.map((id) => ({ sessionId: id, cwd: "/" })) as never,
+    nextCursor,
+  });
+
+  it("liest alle Seiten, nicht nur die ersten 50", async () => {
+    const pages: Record<string, ReturnType<typeof page>> = {
+      "": page(["a", "b"], "p2"),
+      p2: page(["c"], "p3"),
+      p3: page(["d"]),
+    };
+    const asked: (string | undefined)[] = [];
+    const all = await listAllSessions(async (cursor) => {
+      asked.push(cursor);
+      return pages[cursor ?? ""];
+    });
+    expect(all.map((s) => s.sessionId)).toEqual(["a", "b", "c", "d"]);
+    expect(asked).toEqual([undefined, "p2", "p3"]);
+  });
+
+  it("haengt nicht, wenn der Rechner denselben Zeiger wiederholt", async () => {
+    let calls = 0;
+    const all = await listAllSessions(async () => {
+      calls++;
+      return page(["x"], "immer");
+    });
+    expect(calls).toBe(2);
+    expect(all).toHaveLength(2);
+  });
+
+  it("gibt einen Fehler weiter, damit die alte Liste stehen bleibt", async () => {
+    await expect(
+      listAllSessions(async (cursor) => {
+        if (cursor) throw new Error("keine Antwort");
+        return page(["a"], "p2");
+      }),
+    ).rejects.toThrow("keine Antwort");
   });
 });

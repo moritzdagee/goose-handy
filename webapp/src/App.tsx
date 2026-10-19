@@ -54,11 +54,16 @@ import {
 } from "./hosts";
 import {
   newSessionMeta,
+  filterByArchive,
   filterByHost,
   groupSessions,
+  listAllSessions,
+  loadArchiveFilter,
   loadHostFilter,
   mergeHostLists,
+  saveArchiveFilter,
   saveHostFilter,
+  type ArchiveFilter,
   type HostFilter,
   type TaggedSession,
 } from "./sessions";
@@ -71,6 +76,7 @@ import {
   type CachedItem,
 } from "./cache";
 import { HostFilterBar } from "./HostFilterBar";
+import { ArchiveFilterBar } from "./ArchiveFilterBar";
 import { ConnectPanel } from "./ConnectPanel";
 
 type PermOption = { optionId: string; name: string; kind: string };
@@ -232,6 +238,11 @@ export function App({ roam }: { roam: RoamClient }) {
   // a launch or an iOS reload already shows the chats.
   const [sessions, setSessions] = useState<TaggedSession[]>(loadCachedSessions);
   const [hostFilter, setHostFilterState] = useState<HostFilter>(loadHostFilter);
+  const [archiveFilter, setArchiveFilterState] = useState<ArchiveFilter>(loadArchiveFilter);
+  const setArchiveFilter = useCallback((f: ArchiveFilter) => {
+    setArchiveFilterState(f);
+    saveArchiveFilter(f);
+  }, []);
   const setHostFilter = useCallback((f: HostFilter) => {
     setHostFilterState(f);
     saveHostFilter(f);
@@ -616,8 +627,10 @@ export function App({ roam }: { roam: RoamClient }) {
     const lists = await Promise.all(
       conns.map(async (h): Promise<[string, TaggedSession[] | null]> => {
         try {
-          const res = await withTimeout(h.agent.listSessions({}), PROBE_TIMEOUT_MS, h.name);
-          return [h.endpointId, (res.sessions ?? []).map((s) => ({ ...s, _host: h.endpointId }))];
+          const all = await listAllSessions((cursor) =>
+            withTimeout(h.agent.listSessions(cursor ? { cursor } : {}), PROBE_TIMEOUT_MS, h.name),
+          );
+          return [h.endpointId, all.map((s) => ({ ...s, _host: h.endpointId }))];
         } catch (err) {
           console.warn(`listSessions failed for ${h.name}:`, err);
           return [h.endpointId, null];
@@ -1442,9 +1455,12 @@ export function App({ roam }: { roam: RoamClient }) {
             </button>
             <div className="mx-3">
               <HostFilterBar choices={hostChoices} sessions={sessions} value={activeFilter} onChange={setHostFilter} />
+              <div className="mt-1.5">
+                <ArchiveFilterBar sessions={filterByHost(sessions, activeFilter)} value={archiveFilter} onChange={setArchiveFilter} />
+              </div>
             </div>
             <div id="session-list" className="overflow-y-auto flex flex-col">
-              {groupSessions(filterByHost(sessions, activeFilter), projects).map(({ key, label, sessions: group }) => (
+              {groupSessions(filterByArchive(filterByHost(sessions, activeFilter), archiveFilter), projects).map(({ key, label, sessions: group }) => (
                 <div key={key} className="flex flex-col">
                   {label !== null && (
                     <button
@@ -1508,6 +1524,8 @@ export function App({ roam }: { roam: RoamClient }) {
                 filterChoices={hostChoices}
                 filter={activeFilter}
                 onFilter={setHostFilter}
+                archiveFilter={archiveFilter}
+                onArchiveFilter={setArchiveFilter}
               />
             ) : (
             <>
