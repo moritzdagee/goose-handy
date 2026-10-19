@@ -15,13 +15,43 @@ import "./theme.css";
 // semantic token (--color-text-primary, …) is undefined and the UI renders
 // washed out. It's browser-safe: localStorage + matchMedia only.
 import { applyThemeTokens, getResolvedTheme } from "@desktop/theme/theme-tokens";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { IntlProvider } from "react-intl";
 import initWasm, { RoamClient } from "./wasm/goose_roaming_web.js";
 import { App } from "./App";
+import { LockScreen } from "./LockScreen";
+import { shouldRelock } from "./lock";
 
-const SECRET_STORAGE_KEY = "goose-roam-secret-hex";
+// Face-ID-Sperre: the app (and the roam key the Macs accept) only after Face
+// ID. Back on screen after a longer pause, the page reloads into the lock
+// screen; a turn already sent keeps running on the Mac meanwhile.
+function Gate() {
+  const [roam, setRoam] = useState<RoamClient | null>(null);
+  useEffect(() => {
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (shouldRelock(hiddenAt, Date.now())) {
+        location.reload();
+      } else {
+        hiddenAt = null;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+  if (!roam) {
+    return (
+      <LockScreen
+        newSecret={() => new RoamClient(undefined).secretHex()}
+        onUnlocked={(secret) => setRoam(new RoamClient(secret))}
+      />
+    );
+  }
+  return <App roam={roam} />;
+}
 
 async function boot() {
   // Apply the desktop theme (token values + .dark class) before first paint,
@@ -38,15 +68,11 @@ async function boot() {
     });
 
   await initWasm();
-  // Stable per-browser roam identity so the host only accepts this tab once.
-  const saved = localStorage.getItem(SECRET_STORAGE_KEY) ?? undefined;
-  const roam = new RoamClient(saved);
-  if (!saved) localStorage.setItem(SECRET_STORAGE_KEY, roam.secretHex());
 
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <IntlProvider locale="en" defaultLocale="en" messages={{}}>
-        <App roam={roam} />
+        <Gate />
       </IntlProvider>
     </React.StrictMode>,
   );
