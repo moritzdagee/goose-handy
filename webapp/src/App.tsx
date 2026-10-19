@@ -37,6 +37,7 @@ import { Goose } from "@desktop/components/icons/Goose";
 import { ToolCallStatusIndicator, type ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
 import type { RoamClient } from "./wasm/goose_roaming_web.js";
 import { roamByteStreams } from "./roam-stream.js";
+import { continuesBubble, joinChunk } from "./chunks";
 import {
   HOST_CARD_KEY,
   HOSTS_KEY,
@@ -464,11 +465,17 @@ export function App({ roam }: { roam: RoamClient }) {
     mutateItems((xs) => [...xs, { ...item, id: nextId++ } as Item]);
   }, [mutateItems]);
 
-  const chunk = useCallback((role: "user" | "agent" | "thought", text: string) => {
+  const lastMessageId = useRef<string | undefined>(undefined);
+  const chunk = useCallback((role: "user" | "agent" | "thought", text: string, messageId?: string) => {
     mutateItems((xs) => {
       const last = xs[xs.length - 1];
-      if (streamRole.current === role && last?.kind === "msg" && last.role === role) {
-        return [...xs.slice(0, -1), { ...last, text: last.text + text }];
+      const prevId = lastMessageId.current;
+      lastMessageId.current = messageId;
+      if (
+        last?.kind === "msg" && last.role === role &&
+        continuesBubble(role, text, streamRole.current, messageId, prevId)
+      ) {
+        return [...xs.slice(0, -1), { ...last, text: joinChunk(role, last.text, text) }];
       }
       streamRole.current = role;
       return [...xs, { kind: "msg", id: nextId++, role, text }];
@@ -483,13 +490,13 @@ export function App({ roam }: { roam: RoamClient }) {
         const u = params.update;
         switch (u.sessionUpdate) {
           case "user_message_chunk":
-            chunk("user", contentText(u.content));
+            chunk("user", contentText(u.content), (u as { messageId?: string }).messageId);
             break;
           case "agent_message_chunk":
-            chunk("agent", contentText(u.content));
+            chunk("agent", contentText(u.content), (u as { messageId?: string }).messageId);
             break;
           case "agent_thought_chunk":
-            chunk("thought", contentText(u.content));
+            chunk("thought", contentText(u.content), (u as { messageId?: string }).messageId);
             break;
           case "tool_call": {
             streamRole.current = null;
