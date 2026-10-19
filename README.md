@@ -81,3 +81,13 @@ Die App selbst enthaelt keine Geheimnisse. Jeder Browser erzeugt beim ersten Sta
 Schluessel; ein Rechner laesst ihn erst zu, wenn er dort angenommen wurde
 (`koppeln.py` in vibe-suite). Die eingebauten Verbindungs-Karten sagen nur, wo die Rechner
 erreichbar sind.
+
+## Face-ID-Sperre (seit 18.10.2026)
+
+Die App oeffnet sich nur nach Face ID. Beim ersten Start legt sie einen eigenen Passkey an (iCloud-Schluesselbund,
+Seite moritzdagee.github.io) und verschluesselt damit den Zugangsschluessel, den MacBook und Mac Mini kennen
+(WebAuthn mit PRF, AES-GCM, `webapp/src/lock.ts`). Ohne Face ID kann die App sich also gar nicht verbinden.
+Nach mehr als 2 Minuten im Hintergrund sperrt sie sich wieder; ein laufender Auftrag arbeitet auf dem Rechner weiter.
+Ohne PRF (altes iOS) sperrt der Passkey nur die Ansicht. Passkey verloren: "Neu einrichten" auf dem Sperrbildschirm,
+danach das iPhone neu koppeln (vibe-suite `agenten-umgebung/goose-fernzugang/koppeln.py`).
+Live-Pruefung mit virtuellem Passkey: `URL=http://localhost:4199/ node webapp/tests/live-face-id.mjs`.
