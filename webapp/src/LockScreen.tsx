@@ -1,6 +1,8 @@
 // Shown before the app on every start and after a longer pause. Safari only
 // runs Face ID from a tap, so each step is one button.
 import { useState } from "react";
+import { ScanFace } from "lucide-react";
+import { GooseMark } from "./ui/Primitives";
 import {
   createPasskey,
   loadLock,
@@ -78,34 +80,39 @@ export function LockScreen({
   const label = step === "unlock" ? "Mit Face ID entsperren" : step === "create" ? "Passkey anlegen" : "Mit Face ID bestaetigen";
 
   return (
-    <div id="lock-screen" className="min-h-dvh flex items-center justify-center px-6 bg-background-primary text-text-primary">
-      <div className="max-w-sm w-full flex flex-col gap-4 text-center">
-        <div className="text-xl font-semibold">{title}</div>
-        <div className="text-sm text-text-secondary">{text}</div>
-        {lock?.mode === "uv" && step === "unlock" && (
-          <div className="text-xs text-text-tertiary">
-            Dieses iPhone kann den Schluessel nicht mit dem Passkey verschluesseln. Die Sperre schuetzt die Ansicht, der Schluessel liegt aber lesbar auf dem Geraet.
-          </div>
-        )}
+    <div id="lock-screen" className="flex min-h-dvh items-center justify-center bg-canvas px-8 pt-safe pb-safe text-ink">
+      <main className="fade-in flex w-full max-w-sm flex-col items-center gap-6 text-center">
+        <GooseMark size={72} />
+        <div className="flex flex-col gap-3">
+          <h1 className="text-[26px] font-semibold tracking-tight">{title}</h1>
+          <p className="text-[16px] leading-relaxed text-ink-muted">{text}</p>
+        </div>
         <button
           id="lock-action"
+          type="button"
           disabled={busy}
           onClick={() => void action()}
-          className="w-full bg-background-inverse text-text-inverse text-base font-semibold rounded-xl px-4 py-3.5 disabled:opacity-50"
+          className="flex min-h-14 w-full max-w-xs items-center justify-center gap-2 rounded-2xl bg-accent px-6 text-[17px] font-semibold text-accent-ink transition-opacity duration-150 active:opacity-80 disabled:opacity-60"
         >
-          {busy ? "Einen Moment…" : label}
+          <ScanFace size={22} aria-hidden />
+          <span>{busy ? "Einen Moment…" : label}</span>
         </button>
         {error && (
-          <div id="lock-error" className="text-sm text-text-danger">
+          <div id="lock-error" role="alert" className="text-[15px] text-danger">
             {error}
           </div>
         )}
         {step === "unlock" && (
-          <button id="lock-reset" onClick={onReset} className="text-xs text-text-tertiary underline">
+          <button id="lock-reset" type="button" onClick={onReset} className="min-h-11 text-[15px] text-ink-muted underline-offset-4 active:underline">
             Passkey verloren? Neu einrichten
           </button>
         )}
-      </div>
+        {lock?.mode === "uv" && step === "unlock" && (
+          <div className="max-w-xs rounded-xl bg-warn/10 px-4 py-3 text-[13px] leading-snug text-warn">
+            Dieses iPhone kann den Schluessel nicht mit dem Passkey verschluesseln. Die Sperre schuetzt die Ansicht, der Schluessel liegt aber lesbar auf dem Geraet.
+          </div>
+        )}
+      </main>
     </div>
   );
 }

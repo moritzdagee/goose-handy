@@ -5,6 +5,130 @@
 @import './vendor/desktop/styles/main.css';
 @source './**/*.{ts,tsx}';
 
+/* --- Lovable-Gestaltung (Oktober 2026): eigene Farbnamen fuer die Handy-App.
+   Dunkel ist Standard, hell ueber die Systemeinstellung. Die Namen (canvas,
+   surface, ink, accent, ...) kollidieren nicht mit den Desktop-Farben, die
+   MarkdownContent weiter benutzt. --- */
+@theme inline {
+  --color-canvas: var(--g-canvas);
+  --color-surface: var(--g-surface);
+  --color-elevated: var(--g-elevated);
+  --color-line: var(--g-line);
+  --color-ink: var(--g-ink);
+  --color-ink-muted: var(--g-ink-muted);
+  --color-ink-faint: var(--g-ink-faint);
+  --color-accent: var(--g-accent);
+  --color-accent-ink: var(--g-accent-ink);
+  --color-live: var(--g-live);
+  --color-warn: var(--g-warn);
+  --color-danger: var(--g-danger);
+  --color-mini: var(--g-mini);
+  --color-book: var(--g-book);
+  --color-scrim: var(--g-scrim);
+  /* main.css meldet die Schriftstaerken ab (initial); ohne diese Zeilen gibt es
+     font-medium, font-semibold und font-bold gar nicht. */
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+}
+
+:root {
+  --g-canvas: oklch(0.165 0.006 60);
+  --g-surface: oklch(0.205 0.007 60);
+  --g-elevated: oklch(0.25 0.008 60);
+  --g-line: oklch(0.32 0.008 60);
+  --g-ink: oklch(0.96 0.005 70);
+  --g-ink-muted: oklch(0.74 0.008 70);
+  --g-ink-faint: oklch(0.56 0.008 70);
+  --g-accent: oklch(0.72 0.17 50);
+  --g-accent-ink: oklch(0.18 0.03 50);
+  --g-live: oklch(0.76 0.17 150);
+  --g-warn: oklch(0.81 0.15 80);
+  --g-danger: oklch(0.68 0.2 25);
+  --g-mini: oklch(0.76 0.11 245);
+  --g-book: oklch(0.79 0.1 185);
+  --g-scrim: oklch(0 0 0 / 55%);
+  --g-font: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --g-canvas: oklch(0.975 0.004 70);
+    --g-surface: oklch(1 0 0);
+    --g-elevated: oklch(0.945 0.006 70);
+    --g-line: oklch(0.88 0.008 70);
+    --g-ink: oklch(0.2 0.01 60);
+    --g-ink-muted: oklch(0.45 0.01 60);
+    --g-ink-faint: oklch(0.6 0.01 60);
+    --g-accent: oklch(0.66 0.18 48);
+    --g-accent-ink: oklch(0.99 0.005 70);
+    --g-live: oklch(0.58 0.15 150);
+    --g-warn: oklch(0.63 0.14 70);
+    --g-danger: oklch(0.55 0.2 25);
+    --g-mini: oklch(0.5 0.13 250);
+    --g-book: oklch(0.52 0.1 185);
+    --g-scrim: oklch(0.2 0 0 / 35%);
+  }
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+}
+@utility fade-in {
+  animation: g-fade 150ms ease-out both;
+}
+@keyframes g-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+body {
+  background-color: var(--g-canvas);
+  color: var(--g-ink);
+  font-family: var(--g-font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+/* iOS zoomt in Felder unter 16 px hinein */
+textarea, input, select {
+  font-size: 16px;
+}
+/* Antworten von Goose: Desktop-Satz, aber in den Farben der Handy-App */
+#log .msg.agent .prose {
+  --tw-prose-body: var(--g-ink);
+  color: var(--g-ink);
+  font-size: 16px;
+  line-height: 1.6;
+}
+#log .msg.agent .prose a {
+  color: var(--g-accent);
+}
+#log .msg.agent .prose th,
+#log .msg.agent .prose td {
+  border-color: var(--g-line);
+}
+#log .msg.agent .prose thead {
+  background: var(--g-surface);
+}
+#log .msg.agent .prose pre {
+  margin: 0.75rem 0 !important;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+/* Kopier-Knopf im Codeblock: auf dem Handy gibt es kein Hover, also immer zeigen */
+#log .msg.agent .group > button {
+  opacity: 0.85;
+}
+
 /* --- app containment rules (mobile: nothing may pan the page/transcript) --- */
 #log {
   overflow-x: hidden;
@@ -40,9 +164,14 @@ button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
 a:focus-visible {
-  outline: 2px solid var(--color-border-info);
+  outline: 2px solid var(--g-accent);
   outline-offset: 2px;
   border-radius: var(--border-radius-sm, 4px);
+}
+
+/* the composer capsule shows focus itself (orange border) */
+#prompt-input:focus-visible {
+  outline: none;
 }
 
 /* --- app shell lock: the page never scrolls, only inner panes do --- */
@@ -76,7 +205,10 @@ body {
   animation: roam-fade-in 150ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
-  #chat > *, #connect-panel {
+  #chat > *, #connect-panel, .fade-in {
+    animation: none;
+  }
+  .animate-pulse, .animate-ping {
     animation: none;
   }
 }

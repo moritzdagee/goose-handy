@@ -2,9 +2,10 @@
 // onboarding copy, and the pairing card. Purely presentational — all state
 // and actions live in App and arrive as props.
 import type { RefObject } from "react";
-import { Camera, ChevronLeft, ChevronRight } from "lucide-react";
-import { Goose } from "@desktop/components/icons/Goose";
+import { Camera, ChevronDown, ChevronLeft, ChevronRight, Copy, Laptop, Monitor, Plus, Share } from "lucide-react";
 import type { SavedHost } from "./hosts";
+import { hostLabel } from "./hosts";
+import { Dot } from "./ui/Primitives";
 
 type ConnectPanelProps = {
   hosts: SavedHost[];
@@ -53,205 +54,203 @@ export function ConnectPanel({
   stopScan,
   videoRef,
 }: ConnectPanelProps) {
+  const backBtn = "flex size-11 shrink-0 items-center justify-center rounded-xl text-accent active:bg-elevated";
   return (
-        <section id="connect-panel" className="flex-1 grid place-items-center p-3 md:p-6 overflow-auto bg-background-secondary">
-          <div className="w-full max-w-[480px] min-w-0 overflow-hidden bg-background-primary rounded-xl shadow-sm p-6 md:p-8">
-            {hosts.length > 0 && !addingHost ? (
-              <>
-                <div className="flex items-center gap-2 mb-1">
-                  {connected && (
-                    <button
-                      aria-label="back to sessions"
-                      className="text-text-secondary hover:text-text-primary -ml-1 p-0.5"
-                      onClick={() => setShowHosts(false)}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                  )}
-                  <h2 className="text-lg font-semibold">Your hosts</h2>
-                </div>
-                <p className="text-xs text-text-tertiary mb-4">
-                  {connected
-                    ? "connected hosts share one session list — tap to add another"
-                    : "tap to connect"}
-                </p>
-                <div className="flex flex-col gap-1.5">
-                  {hosts.map((h) => {
-                    const live = isHostLive(h.endpointId);
-                    return (
-                    <button
-                      key={h.endpointId}
-                      className="host-row w-full text-left rounded-lg px-3 py-2.5 hover:bg-background-secondary transition-colors flex items-center gap-3 disabled:opacity-50"
-                      disabled={busy || live}
-                      onClick={() => {
-                        setCard(h.card);
-                        void connect(h.card);
-                      }}
-                    >
-                      <Goose className="w-4 h-4 shrink-0 opacity-70" />
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-sm font-medium truncate">{h.name}</span>
-                        <span className="block text-[10px] text-text-tertiary font-mono truncate">
-                          {h.endpointId.slice(0, 16)}
-                        </span>
-                      </span>
-                      {live ? (
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-success">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
-                          connected
-                        </span>
-                      ) : (
-                        <ChevronRight className="w-4 h-4 shrink-0 text-text-tertiary" />
-                      )}
-                    </button>
-                  );})}
-                </div>
-                <div className="mt-4 flex justify-center">
-                  <button
-                    id="add-host"
-                    className="text-xs text-text-secondary rounded-lg px-3 py-1.5 hover:bg-background-secondary hover:text-text-primary transition-colors"
-                    onClick={() => setAddingHost(true)}
-                  >
-                    add another host
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-1">
-                  {hosts.length > 0 && (
-                    <button
-                      aria-label="back to hosts"
-                      className="text-text-secondary hover:text-text-primary -ml-1 p-0.5"
-                      onClick={() => setAddingHost(false)}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                  )}
-                  <h2 className="text-lg font-semibold">
-                    {hosts.length === 0 ? "goose remote" : "Add a host"}
-                  </h2>
-                </div>
-                {hosts.length === 0 ? (
-                  <div className="text-xs text-text-secondary leading-relaxed mb-5 space-y-2">
-                    <p>
-                      Chat with a goose agent on your own machine, from this browser —
-                      peer to peer, no accounts, nothing in between.
-                    </p>
-                    <ol className="list-decimal ml-4 space-y-0.5 text-text-tertiary">
-                      <li>
-                        on your machine: <code className="font-mono">goose roam share --qr</code>
-                      </li>
-                      <li>scan or paste its card below</li>
-                      <li>
-                        accept this browser once:{" "}
-                        <code className="font-mono">goose roam pair</code> (or{" "}
-                        <code className="font-mono">peers accept</code>) with the card under
-                        “first time?”
-                      </li>
-                    </ol>
-                  </div>
-                ) : (
-                  <p className="text-xs text-text-tertiary mb-4">
-                    a machine running <code className="font-mono">goose roam share</code>
-                  </p>
-                )}
-                <input
-                  id="host-name"
-                  type="text"
-                  className="w-full bg-background-secondary rounded-lg px-3 py-2 text-sm mb-2"
-                  placeholder="name (optional) — e.g. laptop"
-                  value={hostName}
-                  onChange={(e) => setHostName(e.target.value)}
-                />
-                <textarea
-                  id="card-input"
-                  rows={3}
-                  className="w-full bg-background-secondary rounded-lg px-3 py-2.5 text-sm font-mono resize-none"
-                  placeholder="goose+roam://…  (the host's card)"
-                  value={card}
-                  onChange={(e) => setCard(e.target.value)}
-                />
-                <div className="mt-2.5 flex items-center gap-2">
-                  {canScan && (
-                    <button
-                      id="scan-card"
-                      type="button"
-                      className="inline-flex items-center gap-1.5 text-text-secondary rounded-lg px-3 py-1.5 text-xs hover:bg-background-secondary hover:text-text-primary transition-colors"
-                      onClick={() => void startScan()}
-                    >
-                      <Camera className="w-3.5 h-3.5" /> scan QR
-                    </button>
-                  )}
-                  <span className="flex-1" />
-                  <button
-                    id="connect-btn"
-                    disabled={busy}
-                    onClick={() => void connect()}
-                    className="bg-background-inverse text-text-inverse text-sm font-medium rounded-lg px-4 py-1.5 hover:brightness-110 disabled:opacity-50"
-                  >
-                    connect
-                  </button>
-                </div>
-                <details
-                  className="mt-6 pt-4 border-t border-border-primary"
-                  open={pairOpen}
-                  onToggle={(e) => setPairOpen((e.target as HTMLDetailsElement).open)}
-                >
-                  <summary className="text-xs text-text-secondary cursor-pointer select-none">
-                    first time? pair this browser with the host
-                  </summary>
-                  <div className="mt-2.5 text-xs text-text-secondary leading-relaxed">
-                    Send this browser's card to the host and accept it once:
-                    <div className="flex gap-2 items-center my-2 min-w-0">
-                      <code
-                        id="my-card"
-                        className="flex-1 min-w-0 font-mono text-[11px] bg-background-secondary rounded-lg px-2.5 py-1.5 overflow-hidden text-ellipsis whitespace-nowrap"
-                      >
-                        {myCard}
-                      </code>
-                      <button
-                        id="copy-card"
-                        className="shrink-0 text-text-secondary rounded-lg px-2.5 py-1 text-xs hover:bg-background-secondary hover:text-text-primary transition-colors"
-                        onClick={() => navigator.clipboard?.writeText(myCard)}
-                      >
-                        copy
-                      </button>
-                      {"share" in navigator && (
-                        <button
-                          id="share-card"
-                          className="shrink-0 text-text-secondary rounded-lg px-2.5 py-1 text-xs hover:bg-background-secondary hover:text-text-primary transition-colors"
-                          onClick={() => void navigator.share({ text: myCard }).catch(() => {})}
-                        >
-                          share
-                        </button>
-                      )}
-                    </div>
-                    <code className="block font-mono text-[11px] text-text-info bg-background-secondary rounded-lg px-2.5 py-2 break-all">
-                      goose roam peers accept '&lt;card&gt;'
-                    </code>
-                    <div className="text-[10px] text-text-tertiary mt-1.5">
-                      key <code id="my-endpoint-id" className="font-mono break-all">{myId}</code>
-                    </div>
-                  </div>
-                </details>
-              </>
-            )}
-          </div>
-          {scanning && (
-            <div
-              className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center gap-3"
-              onClick={() => stopScan()}
-            >
-              <video
-                ref={videoRef}
-                className="w-[90vw] max-w-[480px] rounded-xl"
-                playsInline
-                muted
-              />
-              <div className="text-white text-sm">point at the host QR — tap to cancel</div>
+    <section id="connect-panel" className="flex-1 overflow-y-auto overscroll-contain bg-canvas px-4 pt-4 pb-safe">
+      <div className="fade-in mx-auto w-full max-w-[480px] min-w-0">
+        {hosts.length > 0 && !addingHost ? (
+          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
+            <div className="flex items-center gap-1 px-2 pt-2">
+              {connected && (
+                <button type="button" aria-label="Zurueck zu den Chats" className={backBtn} onClick={() => setShowHosts(false)}>
+                  <ChevronLeft size={22} aria-hidden />
+                </button>
+              )}
+              <h2 className={`text-[19px] font-semibold ${connected ? "" : "pl-2"}`}>Deine Rechner</h2>
             </div>
-          )}
-        </section>
+            <p className="px-4 pt-1 pb-3 text-[14px] text-ink-muted">
+              {connected
+                ? "Verbundene Rechner teilen sich eine Chat-Liste. Tippen zum Verbinden."
+                : "Tippen zum Verbinden."}
+            </p>
+            <div className="divide-y divide-line border-t border-line">
+              {hosts.map((h) => {
+                const live = isHostLive(h.endpointId);
+                const name = hostLabel(h.endpointId, h.name);
+                const Icon = /book/i.test(name) ? Laptop : Monitor;
+                return (
+                  <button
+                    key={h.endpointId}
+                    type="button"
+                    className="host-row flex min-h-16 w-full items-center gap-3 px-4 text-left transition-colors active:bg-elevated disabled:cursor-default"
+                    disabled={busy || live}
+                    aria-label={`${name}, ${live ? "verbunden" : "verbinden"}`}
+                    onClick={() => {
+                      setCard(h.card);
+                      void connect(h.card);
+                    }}
+                  >
+                    <Icon size={22} aria-hidden className="shrink-0 text-ink-muted" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[16px] font-medium">{name}</span>
+                      <span className="block truncate font-mono text-[12px] text-ink-faint">{h.endpointId.slice(0, 16)}</span>
+                    </span>
+                    {live ? (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 text-[13px] text-live">
+                        <Dot tone="live" /> verbunden
+                      </span>
+                    ) : busy ? (
+                      <Dot tone="warn" pulse />
+                    ) : (
+                      <ChevronRight size={18} aria-hidden className="shrink-0 text-ink-faint" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              id="add-host"
+              type="button"
+              className="flex min-h-12 w-full items-center justify-center gap-1.5 border-t border-line text-[15px] text-accent active:bg-elevated"
+              onClick={() => setAddingHost(true)}
+            >
+              <Plus size={17} aria-hidden /> Weiteren Rechner hinzufuegen
+            </button>
+          </div>
+        ) : (
+          <div className="px-1">
+            <div className="flex items-center gap-1">
+              {hosts.length > 0 && (
+                <button type="button" aria-label="Zurueck zu den Rechnern" className={`${backBtn} -ml-3`} onClick={() => setAddingHost(false)}>
+                  <ChevronLeft size={22} aria-hidden />
+                </button>
+              )}
+              <h2 className="text-[24px] font-semibold tracking-tight">Rechner hinzufuegen</h2>
+            </div>
+            <ol className="mt-4 flex flex-col gap-2.5">
+              {[
+                <>Auf dem Rechner: <code className="font-mono text-[13px] text-ink">goose roam share --qr</code></>,
+                <>QR-Code scannen oder die Karte unten einfuegen.</>,
+                <>Beim ersten Mal dieses iPhone dort annehmen (siehe unten).</>,
+              ].map((t, i) => (
+                <li key={i} className="flex gap-3 text-[15px] text-ink-muted">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[13px] font-semibold text-accent">{i + 1}</span>
+                  <span className="min-w-0">{t}</span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-6 flex flex-col gap-3">
+              <input
+                id="host-name"
+                type="text"
+                aria-label="Name des Rechners, freiwillig"
+                className="min-h-12 w-full rounded-xl border border-line bg-surface px-4 text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+                placeholder="Name (freiwillig), z.B. Laptop"
+                value={hostName}
+                onChange={(e) => setHostName(e.target.value)}
+              />
+              <textarea
+                id="card-input"
+                rows={3}
+                aria-label="Verbindungskarte des Rechners"
+                className="w-full resize-none rounded-xl border border-line bg-surface px-4 py-3 font-mono text-[14px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+                placeholder="goose+roam://… (Karte des Rechners)"
+                value={card}
+                onChange={(e) => setCard(e.target.value)}
+              />
+              <div className="flex gap-3">
+                {canScan && (
+                  <button
+                    id="scan-card"
+                    type="button"
+                    className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-elevated text-[15px] font-medium text-ink"
+                    onClick={() => void startScan()}
+                  >
+                    <Camera size={18} aria-hidden /> QR-Code scannen
+                  </button>
+                )}
+                <button
+                  id="connect-btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void connect()}
+                  className="min-h-12 flex-1 rounded-xl bg-accent text-[16px] font-semibold text-accent-ink disabled:opacity-40"
+                >
+                  {busy ? "Einen Moment…" : "Verbinden"}
+                </button>
+              </div>
+            </div>
+            <details
+              className="group mt-6 overflow-hidden rounded-2xl border border-line bg-surface"
+              open={pairOpen}
+              onToggle={(e) => setPairOpen((e.target as HTMLDetailsElement).open)}
+            >
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 px-4 text-[15px] select-none [&::-webkit-details-marker]:hidden">
+                Zum ersten Mal? Dieses iPhone mit dem Rechner koppeln
+                <ChevronDown size={18} aria-hidden className="shrink-0 text-ink-faint transition-transform duration-150 group-open:rotate-180" />
+              </summary>
+              <div className="flex flex-col gap-3 border-t border-line p-4 text-[13px] text-ink-muted">
+                <span>Schick die Karte dieses iPhones an den Rechner und nimm sie dort einmal an:</span>
+                <code
+                  id="my-card"
+                  className="block min-w-0 truncate rounded-lg bg-elevated px-3 py-2 font-mono text-[13px] text-ink"
+                >
+                  {myCard}
+                </code>
+                <div className="flex gap-2">
+                  <button
+                    id="copy-card"
+                    type="button"
+                    className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-elevated text-[14px] text-ink"
+                    onClick={() => navigator.clipboard?.writeText(myCard)}
+                  >
+                    <Copy size={16} aria-hidden /> Kopieren
+                  </button>
+                  {"share" in navigator && (
+                    <button
+                      id="share-card"
+                      type="button"
+                      className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-elevated text-[14px] text-ink"
+                      onClick={() => void navigator.share({ text: myCard }).catch(() => {})}
+                    >
+                      <Share size={16} aria-hidden /> Teilen
+                    </button>
+                  )}
+                </div>
+                <span>Auf dem Rechner im Terminal:</span>
+                <code className="block overflow-x-auto rounded-lg bg-elevated px-3 py-2 font-mono text-[12px] break-all text-ink">
+                  goose roam peers accept '&lt;Karte&gt;'
+                </code>
+                <span className="font-mono text-[12px] break-all text-ink-faint">
+                  Schluessel <code id="my-endpoint-id" className="font-mono">{myId}</code>
+                </span>
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+      {scanning && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="QR-Scan abbrechen"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 bg-black/90 px-8 pt-safe pb-safe"
+          onClick={() => stopScan()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" || e.key === "Enter") stopScan();
+          }}
+        >
+          <div className="relative w-full max-w-[320px]">
+            <video ref={videoRef} className="aspect-square w-full rounded-3xl object-cover" playsInline muted />
+            {["top-0 left-0 border-t-4 border-l-4 rounded-tl-3xl", "top-0 right-0 border-t-4 border-r-4 rounded-tr-3xl", "bottom-0 left-0 border-b-4 border-l-4 rounded-bl-3xl", "bottom-0 right-0 border-b-4 border-r-4 rounded-br-3xl"].map((c) => (
+              <span key={c} aria-hidden className={`pointer-events-none absolute size-12 border-accent ${c}`} />
+            ))}
+          </div>
+          <div className="max-w-[260px] text-center text-[16px] leading-relaxed text-white">
+            Auf den QR-Code des Rechners halten. Tippen zum Abbrechen.
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
