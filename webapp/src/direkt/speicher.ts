@@ -17,7 +17,7 @@ export type DirektNachricht = {
 };
 
 export type KlonHerkunft = {
-  geraet: "mini" | "macbook" | "unbekannt";
+  geraet: "mini" | "macbook" | "tablet" | "unbekannt";
   sessionId: string;
   titel: string;
   geklontAm: string;

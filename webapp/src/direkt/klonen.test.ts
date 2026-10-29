@@ -2,7 +2,9 @@ import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CachedItem } from "../cache";
-import { KLON_MAX_NACHRICHTEN, aufIphoneKlonen, beitraegeAusZwischenspeicher, fuerKlonKuerzen, geraetVonHost } from "./klonen";
+import { KLON_MAX_NACHRICHTEN, aufIphoneKlonen, beitraegeAusZwischenspeicher, fuerKlonKuerzen, geraetVonHost, tabletChatKlonen } from "./klonen";
+import { herkunftText } from "./liste";
+import type { TabletVerlauf } from "./tablet";
 import { _speicherZuruecksetzen, alleChats, chatLesen } from "./speicher";
 import { direktSenden } from "./chat";
 import { netz, sse, textDelta } from "./netz.testhilfe";
@@ -80,5 +82,61 @@ describe("Rechner-Chat auf dem iPhone weiterfuehren", () => {
     expect(geraetVonHost("Mac Mini")).toBe("mini");
     expect(geraetVonHost("MacBook")).toBe("macbook");
     expect(geraetVonHost("host abc")).toBe("unbekannt");
+  });
+});
+
+describe("Tablet-Chat auf das iPhone klonen", () => {
+  const VERLAUF_TABLET: TabletVerlauf = {
+    id: 439849,
+    ref: "moose-beta-tablet-chat-5",
+    titel: "Moin",
+    zeit: "2026-10-28T13:52:44.000Z",
+    beitraege: [
+      { rolle: "nutzer", text: "Moin" },
+      { rolle: "assistent", text: "Moin Moritz!" },
+      { rolle: "nutzer", text: "Wie ist die Lage?" },
+      { rolle: "assistent", text: "Ruhiger Tag." },
+    ],
+  };
+
+  it("legt 'Klon: <Titel>' mit Herkunft Tablet an, Anzeige 'Klon vom Tablet'", async () => {
+    const c = await tabletChatKlonen(VERLAUF_TABLET);
+    expect(c.titel).toBe("Klon: Moin");
+    expect(c.herkunft).toMatchObject({ geraet: "tablet", sessionId: "moose-beta-tablet-chat-5", titel: "Moin" });
+    expect(herkunftText(c)).toBe("Klon vom Tablet");
+    expect(c.nachrichten[0].rolle).toBe("system");
+    expect(c.nachrichten[0].text).toContain("Tablet");
+    expect(c.nachrichten[0].text).toContain("Wissensdatenbank");
+    expect(c.nachrichten.slice(1).map((n) => [n.rolle, n.text])).toEqual(VERLAUF_TABLET.beitraege.map((b) => [b.rolle, b.text]));
+    expect(c.nachrichten.slice(1).every((n) => n.modell === "Klon (Tablet)")).toBe(true);
+    expect(c.spiegel).toBe("ausstehend");
+    expect((await chatLesen(c.id))!.titel).toBe("Klon: Moin");
+  });
+
+  it("ohne source_ref: Kennung aus der Datenbank-Nummer", async () => {
+    const c = await tabletChatKlonen({ ...VERLAUF_TABLET, ref: null });
+    expect(c.herkunft?.sessionId).toBe("kb-439849");
+  });
+
+  it("kuerzt wie beim Rechner-Klon und sagt es", async () => {
+    const beitraege = Array.from({ length: KLON_MAX_NACHRICHTEN + 4 }, (_, i) => ({ rolle: (i % 2 ? "assistent" : "nutzer") as "nutzer" | "assistent", text: `Nr ${i}` }));
+    const c = await tabletChatKlonen({ ...VERLAUF_TABLET, beitraege });
+    expect(c.nachrichten).toHaveLength(KLON_MAX_NACHRICHTEN + 1);
+    expect(c.nachrichten[0].text).toContain("4 aeltere");
+  });
+
+  it("danach geht es direkt mit Mistral weiter, mit dem Tablet-Verlauf als Grundlage", async () => {
+    const c = await tabletChatKlonen(VERLAUF_TABLET);
+    const n = netz({ "api.mistral.ai": [sse(textDelta("Weiter gehts."))] });
+    await direktSenden(c.id, "und jetzt?", { schluessel: { mistral: "m" }, abruf: n.fetch, online: () => true });
+    const msgs = n.aufrufe[0].body!.messages as { role: string; content: string }[];
+    expect(msgs.map((m) => m.role)).toEqual(["system", "user", "assistant", "user", "assistant", "user"]);
+    expect(msgs[1].content).toContain("Weitergefuehrt vom Tablet");
+    expect(msgs[4].content).toBe("Ruhiger Tag.");
+  });
+
+  it("leerer Tablet-Chat: klare Meldung, kein leerer Klon", async () => {
+    await expect(tabletChatKlonen({ ...VERLAUF_TABLET, beitraege: [] })).rejects.toThrow("leer");
+    expect(await alleChats()).toEqual([]);
   });
 });

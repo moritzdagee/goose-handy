@@ -9,7 +9,8 @@ export const IPHONE_LABEL = "iPhone";
 export function herkunftText(c: Pick<DirektChat, "herkunft">): string | null {
   const h = c.herkunft;
   if (!h) return null;
-  return `Klon vom ${h.geraet === "mini" ? "Mac Mini" : h.geraet === "macbook" ? "MacBook" : "Rechner"}`;
+  const name = { mini: "Mac Mini", macbook: "MacBook", tablet: "Tablet" }[h.geraet as string] ?? "Rechner";
+  return `Klon vom ${name}`;
 }
 
 export function direktAlsSitzungen(chats: DirektChat[]): TaggedSession[] {

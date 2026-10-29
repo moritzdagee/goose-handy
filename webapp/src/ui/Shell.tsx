@@ -5,7 +5,7 @@
 // #new-session, #session-list, .session-item, #back-to-matrix, ...) are the
 // ones the tests and Playwright scripts use.
 import { ChevronDown, ChevronLeft, Laptop, Menu, Monitor, Plus, SlidersHorizontal, Smartphone } from "lucide-react";
-import type { ArchiveFilter, HostFilter, SessionGroup, TaggedSession } from "../sessions";
+import { isTablet, type ArchiveFilter, type HostFilter, type SessionGroup, type TaggedSession } from "../sessions";
 import { ArchiveFilterBar } from "../ArchiveFilterBar";
 import { HostFilterBar, type HostChoice } from "../HostFilterBar";
 import { Dot, GooseMark, HostBadge, Pill, ago, isLive } from "./Primitives";
@@ -234,7 +234,7 @@ export function Sidebar({
                         <span className="shrink-0">{ago(s.updatedAt)}</span>
                         {showHost && <HostBadge name={label(s._host)} />}
                       </div>
-                      {isLive(s.updatedAt) && (
+                      {!isTablet(s) && isLive(s.updatedAt) && (
                         <span className="absolute top-1/2 right-3 -translate-y-1/2" title="in den letzten 5 Minuten aktiv">
                           <Dot tone="live" />
                         </span>

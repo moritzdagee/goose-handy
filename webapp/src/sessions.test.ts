@@ -229,3 +229,20 @@ describe("Direkt-Chats in den Gruppen", () => {
     expect(groups[0].sessions.map((s) => s.sessionId)).toEqual(["d"]);
   });
 });
+
+describe("Tablet-Chats (Kopie aus der Datenbank) in den Gruppen", () => {
+  it("eigene Gruppe 'Vom Tablet' nach dem iPhone, vor den Rechner-Chats", async () => {
+    const { groupSessions, IPHONE_HOST, TABLET_HOST, isTablet, isDirekt, filterByHost } = await import("./sessions");
+    const alle = [
+      { sessionId: "a", cwd: "/x", _host: "mini" } as never,
+      { sessionId: "7", cwd: "", _host: TABLET_HOST } as never,
+      { sessionId: "d", cwd: "", _host: IPHONE_HOST } as never,
+    ];
+    const groups = groupSessions(alle, {});
+    expect(groups.map((g) => g.label)).toEqual(["Auf dem iPhone", "Vom Tablet", "chats"]);
+    expect(groups[1].sessions.map((s) => s.sessionId)).toEqual(["7"]);
+    expect(isTablet({ _host: TABLET_HOST })).toBe(true);
+    expect(isDirekt({ _host: TABLET_HOST })).toBe(false);
+    expect(filterByHost(alle as { _host: string }[], TABLET_HOST)).toHaveLength(1);
+  });
+});

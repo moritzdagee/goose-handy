@@ -22,7 +22,8 @@ Home-Bildschirm").
 | Chat-Liste und Verlauf nur aus der Verbindung | Chat-Liste und die letzten 15 geoeffneten Chats bleiben auf dem Handy gespeichert und stehen nach dem Oeffnen sofort da |
 | Oberflaeche der Desktop-App, englisch, klein | eigene Gestaltung aus Lovable (Oktober 2026): dunkel als Standard, orange Akzentfarbe, grosse Tippflaechen, alles Deutsch |
 | ohne erreichbaren Rechner kein Chat | Direkt-Chat: das iPhone fragt Mistral selbst, auch wenn Mac Mini und MacBook aus sind (seit 29.10.2026, siehe unten) |
-| Chat-Liste nur mit Rechner-Chats | Chips "Alle / iPhone / Mac Mini / MacBook" mit Anzahl, Aktiv/Archiv, Suche; untere Leiste Chats, Rechner, Einstellungen wie auf dem Tablet |
+| Chat-Liste nur mit Rechner-Chats | Chips "Alle / iPhone / Tablet / Mac Mini / MacBook" mit Anzahl, Aktiv/Archiv, Suche; untere Leiste Chats, Rechner, Einstellungen wie auf dem Tablet |
+| Chats vom Tablet unsichtbar | Tablet-Chats (Moose beta) als "Kopie aus der Datenbank" lesen und "Auf dieses iPhone klonen" (seit 29.10.2026, siehe unten) |
 
 Gestaltung (seit 28.10.2026): entworfen im Lovable-Projekt "Goose iPhone Assistant"
 (https://lovable.dev/projects/905d7037-aa4a-4e12-b5c8-4ae24ce0b870, nur Beispieldaten) und von Hand
@@ -89,6 +90,19 @@ die Antwort waechst live (Strom). Code in `webapp/src/direkt/`, Logik uebernomme
   die Herkunft `https://moritzdagee.github.io` zu (assistant_data #617).
 - **Weiterfuehren**: ist der Rechner eines geoeffneten Chats nicht erreichbar, holt "Auf dem iPhone
   weiterfuehren" den gemerkten Verlauf (Zwischenspeicher) als Direkt-Chat "Klon: <Titel>".
+
+- **Tablet-Chats** (mit Datenbank-Schluessel): das Android-Tablet (Moose beta) ist kein Gastgeber,
+  spiegelt aber jedes Gespraech in die Wissensdatenbank (kind conversation, source `moose-beta`,
+  Verlauf als `Moritz: ...` / `Moose beta: ...` mit Leerzeilen). Das iPhone liest davon nur
+  (`kb_recent` mit source exakt `moose-beta`, bis 50 Eintraege; `kb_get_document` beim Oeffnen) und
+  zeigt sie unter dem Chip "Tablet" und in der Gruppe "Vom Tablet" als "Kopie aus der Datenbank".
+  Antippen zeigt den Verlauf nur lesend; "Auf dieses iPhone klonen" legt einen Direkt-Chat
+  "Klon: <Titel>" an (Herkunft "Klon vom Tablet", Kuerzung wie beim Weiterfuehren). Gibt es schon
+  einen Klon, oeffnet "Klon auf dem iPhone oeffnen" diesen. Liste und die 15 zuletzt geoeffneten
+  Verlaeufe bleiben im Browser-Speicher, offline gilt dieser Stand. Ohne Schluessel steht im Chip
+  "Tablet" ein Hinweis statt eines Fehlers. Code: `webapp/src/direkt/tablet.ts`, `useTablet.ts`,
+  `TabletChatAnsicht.tsx`. Grenzfall: eine Leerzeile plus `Moritz: ` mitten in einem Text (ausserhalb
+  eines Code-Blocks) liest der Zerleger als neue Nachricht, weil das Tablet-Format das nicht unterscheidet.
 
 Optische Pruefung ohne Netz und ohne Rechner (Mistral und Datenbank nachgebaut, virtueller Passkey):
 `(cd webapp && npm run build && npx vite preview --port 5199)`, dann
