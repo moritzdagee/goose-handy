@@ -214,3 +214,18 @@ describe("listAllSessions", () => {
     ).rejects.toThrow("keine Antwort");
   });
 });
+
+describe("Direkt-Chats in den Gruppen", () => {
+  it("stehen als eigene Gruppe 'Auf dem iPhone' ganz oben", async () => {
+    const { groupSessions, IPHONE_HOST } = await import("./sessions");
+    const groups = groupSessions(
+      [
+        { sessionId: "a", cwd: "/x", _host: "mini" } as never,
+        { sessionId: "d", cwd: "", _host: IPHONE_HOST } as never,
+      ],
+      {},
+    );
+    expect(groups.map((g) => g.label)).toEqual(["Auf dem iPhone", "chats"]);
+    expect(groups[0].sessions.map((s) => s.sessionId)).toEqual(["d"]);
+  });
+});

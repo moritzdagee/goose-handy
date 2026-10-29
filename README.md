@@ -21,6 +21,8 @@ Home-Bildschirm").
 | neue Chats im Arbeitsordner des Rechners | neue Chats im Unterordner "Vom iPhone gestartet"; die Mac-App zeigt ihn als eigene, aufklappbare Rubrik, die Handy-App als eigene Gruppe |
 | Chat-Liste und Verlauf nur aus der Verbindung | Chat-Liste und die letzten 15 geoeffneten Chats bleiben auf dem Handy gespeichert und stehen nach dem Oeffnen sofort da |
 | Oberflaeche der Desktop-App, englisch, klein | eigene Gestaltung aus Lovable (Oktober 2026): dunkel als Standard, orange Akzentfarbe, grosse Tippflaechen, alles Deutsch |
+| ohne erreichbaren Rechner kein Chat | Direkt-Chat: das iPhone fragt Mistral selbst, auch wenn Mac Mini und MacBook aus sind (seit 29.10.2026, siehe unten) |
+| Chat-Liste nur mit Rechner-Chats | Chips "Alle / iPhone / Mac Mini / MacBook" mit Anzahl, Aktiv/Archiv, Suche; untere Leiste Chats, Rechner, Einstellungen wie auf dem Tablet |
 
 Gestaltung (seit 28.10.2026): entworfen im Lovable-Projekt "Goose iPhone Assistant"
 (https://lovable.dev/projects/905d7037-aa4a-4e12-b5c8-4ae24ce0b870, nur Beispieldaten) und von Hand
@@ -60,6 +62,37 @@ Anhaenge: der Goose-Bau auf MacBook und Mac Mini (vibe-suite
 Datei und legt eine Kopie nach `~/in-die-datenbank/goose/`, von dort kommt sie in die
 Wissensdatenbank. Grosse Fotos und HEIC werden auf dem Handy zu JPEG (laengste Kante 2400
 Pixel) umgerechnet, Dateien bis 25 MB.
+
+## Direkt-Chat auf dem iPhone (seit 29.10.2026)
+
+Wie die Tablet-App Moose beta: ein Chat, der ohne Mac Mini und MacBook laeuft. Das iPhone ruft
+Mistral selbst auf (Standard `mistral-large-4-0`, EUrouter als zweite Quelle, Modellwahl je Chat),
+die Antwort waechst live (Strom). Code in `webapp/src/direkt/`, Logik uebernommen aus
+`~/moose-beta/src/lib/` (chat, strom, anbieter, gespraechSync, klonen).
+
+- **Neuer Chat** fragt: "Hier auf dem iPhone (direkt)", "auf Mac Mini", "auf MacBook" (Rechner nur,
+  wenn verbunden). Rechner-Chats verhalten sich wie bisher und landen weiter in "Vom iPhone gestartet".
+- **Speicher**: Direkt-Chats liegen in IndexedDB (`goose-handy-direkt`) auf dem iPhone.
+- **Schluessel** (Mistral Pflicht, EUrouter und Wissensdatenbank freiwillig): unten "Einstellungen",
+  einfuegen, "Speichern". Sie werden sofort mit AES-GCM verschluesselt; der Schluessel dazu entsteht
+  beim Entsperren mit Face ID aus dem Passkey (PRF, eigener HKDF-Zweck `goose-handy-tresor-v1`,
+  `lock.ts` `vaultKey`) und lebt nur im Arbeitsspeicher. Im Browser-Speicher steht kein Klartext.
+  Ohne PRF (altes iOS) werden keine Schluessel gespeichert. "Passkey verloren? Neu einrichten"
+  loescht sie mit.
+- **Offline**: eine Frage ohne Netz bleibt mit "wartet" stehen und geht automatisch raus, sobald Netz
+  da ist (auch nach einem Neustart der App).
+- **Wissensdatenbank** (mit Datenbank-Schluessel): Such-Werkzeug fuer das Modell (kb_search mit
+  Gespraech, conversation_id, geraet/agent/modell, Regel 0p2) und Ablage jedes Gespraechs ueber
+  `kb_ingest_document` (kind conversation, source `goose-handy`, Etiketten `geraet:iphone`,
+  `agent:goose-handy`, `modell:<id>`, conversation_id `goose-handy-iphone-chat-<id>`). Ohne
+  Schluessel oder Netz wartet die Ablage und wird nachgeholt. Die Bruecke kb.bios.love laesst dafuer
+  die Herkunft `https://moritzdagee.github.io` zu (assistant_data #617).
+- **Weiterfuehren**: ist der Rechner eines geoeffneten Chats nicht erreichbar, holt "Auf dem iPhone
+  weiterfuehren" den gemerkten Verlauf (Zwischenspeicher) als Direkt-Chat "Klon: <Titel>".
+
+Optische Pruefung ohne Netz und ohne Rechner (Mistral und Datenbank nachgebaut, virtueller Passkey):
+`(cd webapp && npm run build && npx vite preview --port 5199)`, dann
+`URL=http://localhost:5199/ node webapp/tests/direkt-visuell.mjs` (Fotos `/tmp/handy-direkt-*.png`).
 
 ## Bauen und veroeffentlichen
 

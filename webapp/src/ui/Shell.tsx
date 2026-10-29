@@ -4,7 +4,7 @@
 // ids (#status, #header-new-chat, #switch-host, #sidebar-toggle,
 // #new-session, #session-list, .session-item, #back-to-matrix, ...) are the
 // ones the tests and Playwright scripts use.
-import { ChevronDown, ChevronLeft, Laptop, Menu, Monitor, Plus, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ChevronLeft, Laptop, Menu, Monitor, Plus, SlidersHorizontal, Smartphone } from "lucide-react";
 import type { ArchiveFilter, HostFilter, SessionGroup, TaggedSession } from "../sessions";
 import { ArchiveFilterBar } from "../ArchiveFilterBar";
 import { HostFilterBar, type HostChoice } from "../HostFilterBar";
@@ -38,7 +38,10 @@ export function AppHeader({
   onToggleSidebar,
   onNew,
   onHosts,
+  direkt = false,
 }: {
+  /** Direkt-Chat moeglich: Neu und Seitenleiste auch ohne Rechner. */
+  direkt?: boolean;
   connected: boolean;
   connecting: boolean;
   status: string;
@@ -57,7 +60,7 @@ export function AppHeader({
   return (
     <header className="shrink-0 border-b border-line bg-canvas pt-safe">
       <div className="flex h-14 items-center gap-1 pr-3 pl-1.5">
-        {(connected || connecting) && (
+        {(connected || connecting || direkt) && (
           <button
             id="sidebar-toggle"
             type="button"
@@ -68,7 +71,7 @@ export function AppHeader({
             <Menu size={22} aria-hidden />
           </button>
         )}
-        <span className={`flex shrink-0 items-center gap-1.5 ${connected || connecting ? "" : "pl-2"} md:pl-2`}>
+        <span className={`flex shrink-0 items-center gap-1.5 ${connected || connecting || direkt ? "" : "pl-2"} md:pl-2`}>
           <GooseMark size={26} />
           <span className="text-[17px] font-semibold">Goose</span>
         </span>
@@ -109,7 +112,7 @@ export function AppHeader({
               <span className="tabular-nums">{hostCount}</span>
             </button>
           )}
-          {connected && (
+          {(connected || direkt) && (
             <button
               id="header-new-chat"
               type="button"
@@ -340,11 +343,17 @@ export function HostPicker({
   creating,
   onPick,
   onCancel,
+  onDirekt,
+  offline = [],
 }: {
   hosts: HostChoice[];
   creating: boolean;
   onPick: (endpointId: string) => void;
   onCancel: () => void;
+  /** Erste Wahl "Hier auf dem iPhone (direkt)". */
+  onDirekt?: () => void;
+  /** Bekannte, aber gerade nicht verbundene Rechner: grau mit Hinweis. */
+  offline?: HostChoice[];
 }) {
   return (
     <div id="host-picker" className="fixed inset-0 z-40 flex items-end justify-center bg-scrim md:items-center" onClick={onCancel}>
@@ -355,8 +364,19 @@ export function HostPicker({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line md:hidden" aria-hidden />
-        <div className="mb-4 text-center text-[17px] font-semibold">Neuer Chat auf welchem Rechner?</div>
+        <div className="mb-4 text-center text-[17px] font-semibold">{onDirekt ? "Wo soll der neue Chat laufen?" : "Neuer Chat auf welchem Rechner?"}</div>
         <div className="flex flex-col gap-3">
+          {onDirekt && (
+            <button
+              id="pick-iphone"
+              type="button"
+              onClick={onDirekt}
+              className="pick-direkt flex min-h-16 w-full items-center justify-center gap-3 rounded-2xl bg-accent text-[17px] font-semibold text-accent-ink active:opacity-80"
+            >
+              <Smartphone size={22} aria-hidden />
+              Hier auf dem iPhone (direkt)
+            </button>
+          )}
           {hosts.map((h) => {
             const Icon = /book/i.test(h.label) ? Laptop : Monitor;
             return (
@@ -368,10 +388,20 @@ export function HostPicker({
                 className="pick-host flex min-h-16 w-full items-center justify-center gap-3 rounded-2xl bg-elevated text-[17px] font-semibold text-ink active:opacity-80 disabled:opacity-50"
               >
                 <Icon size={22} aria-hidden className="text-accent" />
-                {h.label}
+                {onDirekt && <span className="font-normal text-ink-muted">auf</span>}
+                {onDirekt && " "}
+                <span>{h.label}</span>
               </button>
             );
           })}
+          {offline.map((h) => (
+            <div
+              key={h.endpointId}
+              className="pick-offline flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-line text-[15px] text-ink-faint"
+            >
+              {h.label} ist gerade nicht erreichbar
+            </div>
+          ))}
         </div>
         <button type="button" className="mt-2 mb-1 min-h-12 w-full text-[16px] text-ink-muted" onClick={onCancel}>
           abbrechen

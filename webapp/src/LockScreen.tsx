@@ -7,8 +7,9 @@ import {
   createPasskey,
   loadLock,
   resetLock,
-  setUpLock,
-  unlock,
+  setUpLockWithPrf,
+  unlockWithPrf,
+  vaultKey,
   verifyWithPasskey,
   SECRET_STORAGE_KEY,
 } from "./lock";
@@ -18,12 +19,18 @@ type Step = "unlock" | "create" | "confirm";
 export function LockScreen({
   newSecret,
   onUnlocked,
+  onVault,
   create = createPasskey,
   verify = verifyWithPasskey,
 }: {
   /** Fresh identity for a phone that has none yet (or after a reset). */
   newSecret: () => string;
   onUnlocked: (secret: string) => void;
+  /**
+   * Called right before onUnlocked with the vault key for further secrets
+   * (Mistral, Datenbank), or null where the passkey has no PRF.
+   */
+  onVault?: (key: CryptoKey | null) => void;
   create?: () => Promise<string>;
   verify?: (credId: string) => Promise<ArrayBuffer | null>;
 }) {
@@ -49,7 +56,9 @@ export function LockScreen({
   const onUnlock = () =>
     run(async () => {
       if (!lock) return setStep("create");
-      onUnlocked(await unlock(lock, verify));
+      const { secret, prf } = await unlockWithPrf(lock, verify);
+      onVault?.(prf ? await vaultKey(prf) : null);
+      onUnlocked(secret);
     });
   const onCreate = () =>
     run(async () => {
@@ -60,10 +69,12 @@ export function LockScreen({
     run(async () => {
       if (!credId) return setStep("create");
       const secret = localStorage.getItem(SECRET_STORAGE_KEY) ?? newSecret();
-      onUnlocked(await setUpLock(secret, verify, credId));
+      const done = await setUpLockWithPrf(secret, verify, credId);
+      onVault?.(done.prf ? await vaultKey(done.prf) : null);
+      onUnlocked(done.secret);
     });
   const onReset = () => {
-    if (!window.confirm("Sperre und Zugangsschluessel auf diesem iPhone loeschen? Danach muss das iPhone neu mit MacBook und Mac Mini gekoppelt werden.")) return;
+    if (!window.confirm("Sperre und Zugangsschluessel auf diesem iPhone loeschen, auch die Schluessel fuer den Direkt-Chat? Danach muss das iPhone neu mit MacBook und Mac Mini gekoppelt werden; die Direkt-Chats selbst bleiben.")) return;
     resetLock();
     setCredId(null);
     setStep("create");

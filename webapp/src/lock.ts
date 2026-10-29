@@ -10,11 +10,15 @@
 
 export const SECRET_STORAGE_KEY = "goose-roam-secret-hex";
 export const LOCK_STORAGE_KEY = "goose-handy-sperre";
+// Further secrets (Mistral, EUrouter, Datenbank) sealed with a key derived
+// from the same passkey secret, see tresor.ts. Gone with resetLock().
+export const TRESOR_STORAGE_KEY = "goose-handy-tresor-v1";
 // Back on screen after this long: lock again (iOS keeps the app in memory).
 export const RELOCK_AFTER_MS = 2 * 60_000;
 
 const PRF_LABEL = "goose-handy-schluessel-v1";
 const HKDF_INFO = "goose-handy-roam-schluessel";
+const TRESOR_INFO = "goose-handy-tresor-v1";
 
 export type Sealed = { iv: string; ct: string };
 export type LockState = { v: 1; credId: string; mode: "prf" | "uv"; sealed?: Sealed };
@@ -41,6 +45,22 @@ async function aesKey(prfOutput: ArrayBuffer): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey("raw", prfOutput, "HKDF", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: new TextEncoder().encode(HKDF_INFO) },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/**
+ * Key for the vault of further secrets (tresor.ts). Derived from the passkey
+ * secret with its own HKDF label, so it differs from the roam key's AES key.
+ * Not extractable: script code can use it, never read it out.
+ */
+export async function vaultKey(prfOutput: ArrayBuffer): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey("raw", prfOutput, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: new TextEncoder().encode(TRESOR_INFO) },
     base,
     { name: "AES-GCM", length: 256 },
     false,
@@ -136,6 +156,15 @@ export async function setUpLock(
   confirm: (credId: string) => Promise<ArrayBuffer | null>,
   credId: string,
 ): Promise<string> {
+  return (await setUpLockWithPrf(secret, confirm, credId)).secret;
+}
+
+/** Like setUpLock, plus the passkey secret for the vault (null without PRF). */
+export async function setUpLockWithPrf(
+  secret: string,
+  confirm: (credId: string) => Promise<ArrayBuffer | null>,
+  credId: string,
+): Promise<{ secret: string; prf: ArrayBuffer | null }> {
   const prf = await confirm(credId);
   if (prf) {
     saveLock({ v: 1, credId, mode: "prf", sealed: await sealSecret(prf, secret) });
@@ -144,23 +173,33 @@ export async function setUpLock(
     localStorage.setItem(SECRET_STORAGE_KEY, secret);
     saveLock({ v: 1, credId, mode: "uv" });
   }
-  return secret;
+  return { secret, prf };
 }
 
 /** Every start: Face ID, then the key. */
 export async function unlock(state: LockState, verify: (credId: string) => Promise<ArrayBuffer | null>): Promise<string> {
+  return (await unlockWithPrf(state, verify)).secret;
+}
+
+/** Like unlock, plus the passkey secret for the vault (null without PRF). */
+export async function unlockWithPrf(
+  state: LockState,
+  verify: (credId: string) => Promise<ArrayBuffer | null>,
+): Promise<{ secret: string; prf: ArrayBuffer | null }> {
   const prf = await verify(state.credId);
   if (state.mode === "prf") {
     if (!prf || !state.sealed) throw new Error("Der Passkey liefert keinen Schluessel.");
-    return unsealSecret(prf, state.sealed);
+    return { secret: await unsealSecret(prf, state.sealed), prf };
   }
   const plain = localStorage.getItem(SECRET_STORAGE_KEY);
   if (!plain) throw new Error("Kein Schluessel auf dem Geraet.");
-  return plain;
+  return { secret: plain, prf: null };
 }
 
 /** Last resort when the passkey is gone: forget everything, new identity, pair again. */
 export function resetLock(): void {
   localStorage.removeItem(LOCK_STORAGE_KEY);
   localStorage.removeItem(SECRET_STORAGE_KEY);
+  // Sealed with the old passkey: unreadable from now on.
+  localStorage.removeItem(TRESOR_STORAGE_KEY);
 }

@@ -170,7 +170,8 @@ a:focus-visible {
 }
 
 /* the composer capsule shows focus itself (orange border) */
-#prompt-input:focus-visible {
+#prompt-input:focus-visible,
+#direkt-input:focus-visible {
   outline: none;
 }
 

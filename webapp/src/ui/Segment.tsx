@@ -31,7 +31,7 @@ export function Segment<T extends string>({
             aria-selected={on}
             data-filter={o.key}
             onClick={() => onChange(o.key)}
-            className={`flex min-h-9 min-w-0 flex-1 items-center justify-center gap-1 truncate rounded-lg transition-colors duration-150 ${dense ? "px-1 text-[13px]" : "px-1.5 text-[14px]"} ${
+            className={`flex min-h-9 min-w-0 ${options.length > 3 ? "flex-auto" : "flex-1"} items-center justify-center gap-1 truncate rounded-lg transition-colors duration-150 ${dense ? "px-1 text-[13px]" : "px-1.5 text-[14px]"} ${
               on ? "bg-surface font-semibold text-ink shadow-sm" : "text-ink-muted"
             }`}
           >

@@ -33,9 +33,11 @@ export function Dot({ tone, pulse, size = 8 }: { tone: DotTone; pulse?: boolean;
   );
 }
 
-/** Mac Mini blue, MacBook teal, anything else neutral. */
+/** Mac Mini blue, MacBook teal, iPhone (direct) orange, anything else neutral. */
 export function HostBadge({ name }: { name: string }) {
-  const cls = /mini/i.test(name)
+  const cls = /iphone/i.test(name)
+    ? "bg-accent/15 text-accent"
+    : /mini/i.test(name)
     ? "bg-mini/15 text-mini"
     : /book/i.test(name)
       ? "bg-book/15 text-book"

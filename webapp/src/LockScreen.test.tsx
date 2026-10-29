@@ -79,3 +79,36 @@ describe("LockScreen", () => {
     expect(onUnlocked).not.toHaveBeenCalled();
   });
 });
+
+describe("LockScreen: Tresor-Schluessel fuer den Direkt-Chat", () => {
+  it("liefert nach Face ID einen nicht auslesbaren Tresor-Schluessel, vor dem Entsperren", async () => {
+    localStorage.setItem(SECRET_STORAGE_KEY, SECRET);
+    const calls: string[] = [];
+    const onVault = vi.fn((k: CryptoKey | null) => calls.push(k ? "tresor" : "kein"));
+    const onUnlocked = vi.fn(() => calls.push("offen"));
+    render(<LockScreen newSecret={() => "x"} onUnlocked={onUnlocked} onVault={onVault} create={async () => "cred"} verify={async () => prf()} />);
+    click();
+    await screen.findByText("Mit Face ID bestaetigen");
+    click();
+    await waitFor(() => expect(onUnlocked).toHaveBeenCalledWith(SECRET));
+    expect(calls).toEqual(["tresor", "offen"]);
+    const key = onVault.mock.calls[0][0] as CryptoKey;
+    expect(key.extractable).toBe(false);
+    cleanup();
+    // naechster Start
+    const onVault2 = vi.fn();
+    render(<LockScreen newSecret={() => "x"} onUnlocked={() => {}} onVault={onVault2} verify={async () => prf()} />);
+    click();
+    await waitFor(() => expect(onVault2).toHaveBeenCalled());
+    expect(onVault2.mock.calls[0][0]).not.toBeNull();
+  });
+
+  it("ohne PRF (altes iOS): kein Tresor-Schluessel", async () => {
+    const onVault = vi.fn();
+    render(<LockScreen newSecret={() => "x"} onUnlocked={() => {}} onVault={onVault} create={async () => "cred"} verify={async () => null} />);
+    click();
+    await screen.findByText("Mit Face ID bestaetigen");
+    click();
+    await waitFor(() => expect(onVault).toHaveBeenCalledWith(null));
+  });
+});

@@ -188,3 +188,53 @@ describe("StartPage Archiv-Filter", () => {
     expect(tabs).toEqual(["Aktiv 1", "Archiviert 0", "Alle 1"]);
   });
 });
+
+describe("StartPage mit Direkt-Chat auf dem iPhone", () => {
+  const IPHONE = { endpointId: "iphone", label: "iPhone" };
+  const direkt = (id: string, title: string, extra: Record<string, unknown> = {}) =>
+    ({ sessionId: id, cwd: "", _host: "iphone", title, updatedAt: minsAgo(1), _meta: {}, ...extra }) as unknown as TaggedSession;
+
+  it("erster Knopf 'hier auf dem iPhone', auch ohne verbundenen Rechner", () => {
+    const onNewDirekt = vi.fn();
+    setup({ hosts: [], onNewDirekt, direktHinweis: "Einmal den Mistral-Schluessel eintragen." });
+    fireEvent.click(document.getElementById("new-on-iphone")!);
+    expect(onNewDirekt).toHaveBeenCalled();
+    expect(document.getElementById("direkt-hinweis")!.textContent).toContain("Mistral");
+    expect(document.getElementById("start-connecting")).not.toBeNull();
+    expect(document.querySelectorAll(".new-chat-btn")).toHaveLength(0);
+  });
+
+  it("Chips iPhone, Mac Mini, MacBook mit Anzahl; iPhone-Chats tragen Abzeichen, Klon und 'wartet'", () => {
+    const sessions = [
+      direkt("d1", "Direkt eins", { _direkt: { herkunft: "Klon vom Mac Mini", wartet: 1 } }),
+      sess("1", "mini-id", "Mini eins", minsAgo(5)),
+      sess("2", "book-id", "Book eins", minsAgo(6)),
+    ];
+    setup({ sessions, filterChoices: [IPHONE, MINI, BOOK], onNewDirekt: () => {} });
+    const tabs = [...document.querySelectorAll(".host-filter [role=tab]")].map((t) => t.textContent);
+    expect(tabs).toEqual(["Alle 3", "iPhone 1", "Mac Mini 1", "MacBook 1"]);
+    const row = document.querySelector(".recent-chat")!.textContent!;
+    expect(row).toContain("iPhone");
+    expect(row).toContain("Klon vom Mac Mini");
+    expect(row).toContain("wartet");
+  });
+
+  it("Filter iPhone zeigt nur die eigenen Chats", () => {
+    setup({ sessions: [direkt("d1", "Direkt"), sess("1", "mini-id", "Mini", minsAgo(2))], filterChoices: [IPHONE, MINI, BOOK], filter: "iphone" });
+    expect(recentTitles()).toEqual(["Direkt"]);
+  });
+
+  it("Suche filtert nach Titel, ohne Treffer 'nichts gefunden'", () => {
+    setup({ sessions: [direkt("d1", "Steuern 2026"), sess("1", "mini-id", "Server Platz", minsAgo(2))], search: true, filterChoices: [IPHONE, MINI] });
+    fireEvent.change(screen.getByLabelText("Chats durchsuchen"), { target: { value: "steuer" } });
+    expect(recentTitles()).toEqual(["Steuern 2026"]);
+    fireEvent.change(screen.getByLabelText("Chats durchsuchen"), { target: { value: "xyz" } });
+    expect(screen.getByText("nichts gefunden")).toBeTruthy();
+  });
+
+  it("ohne Suchfeld-Wunsch kein Suchfeld (bisheriges Verhalten)", () => {
+    setup();
+    expect(document.getElementById("chat-search")).toBeNull();
+    expect(document.getElementById("new-on-iphone")).toBeNull();
+  });
+});

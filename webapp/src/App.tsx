@@ -49,6 +49,8 @@ import {
   loadCollapsed,
 } from "./hosts";
 import {
+  IPHONE_HOST,
+  isDirekt,
   newSessionMeta,
   filterByArchive,
   filterByHost,
@@ -72,7 +74,16 @@ import {
   type CachedItem,
 } from "./cache";
 import { ConnectPanel } from "./ConnectPanel";
-import { AppHeader, ChatTopBar, HostPicker, ReconnectPanel, Sidebar, type ConfigSelect } from "./ui/Shell";
+import { AppHeader, ChatTopBar, HostPicker, Sidebar, type ConfigSelect } from "./ui/Shell";
+import { UntereLeiste } from "./ui/UntereLeiste";
+import { useDirekt } from "./direkt/useDirekt";
+import { DirektChatAnsicht } from "./direkt/DirektChatAnsicht";
+import { DirektEinstellungen } from "./direkt/DirektEinstellungen";
+import { IPHONE_LABEL, direktAlsSitzungen } from "./direkt/liste";
+import { neuerChat as neuerDirektChat } from "./direkt/speicher";
+import { aufIphoneKlonen } from "./direkt/klonen";
+import { STANDARD_MODELL } from "./direkt/anbieter";
+import { Smartphone } from "lucide-react";
 import { AgentMessage, PermCard, PlanCard, RefreshingHint, SystemLine, ThoughtBlock, ToolRow, UserBubble, WorkingIndicator } from "./ui/ChatItems";
 import { Composer } from "./ui/Composer";
 import { Skeleton, isLive } from "./ui/Primitives";
@@ -139,7 +150,12 @@ function fromCache(cached: CachedItem[]): Item[] {
   );
 }
 
-export function App({ roam }: { roam: RoamClient }) {
+export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: CryptoKey | null }) {
+  // Direkt-Chat auf dem iPhone (29.10.2026): Chats, Schluessel, Modelle.
+  const direkt = useDirekt(tresor);
+  const [direktOffen, setDirektOffen] = useState<string | null>(null);
+  const [einstellungen, setEinstellungen] = useState(false);
+  const [klonFehler, setKlonFehler] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [status, setStatus] = useState("not connected");
   const [statusKind, setStatusKind] = useState<"idle" | "busy" | "ok" | "err">("idle");
@@ -606,6 +622,8 @@ export function App({ roam }: { roam: RoamClient }) {
   // host; the stale-result guards (navToken, sessionId filter) keep it from
   // writing into whatever is opened next.
   const leaveSession = useCallback(() => {
+    setDirektOffen(null);
+    setKlonFehler(null);
     navToken.current += 1;
     sessionRef.current = null;
     lastSeenUpdate.current = null;
@@ -642,13 +660,18 @@ export function App({ roam }: { roam: RoamClient }) {
   const hostChoices = [...hosts]
     .sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId))
     .map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }));
-  const activeFilter: HostFilter = hostChoices.some((h) => h.endpointId === hostFilter) ? hostFilter : "all";
+  // Lists show the iPhone's own chats like one more machine.
+  const listChoices = [{ endpointId: IPHONE_HOST, label: IPHONE_LABEL }, ...hostChoices];
+  const allSessions = [...direktAlsSitzungen(direkt.chats), ...sessions];
+  const activeFilter: HostFilter = listChoices.some((h) => h.endpointId === hostFilter) ? hostFilter : "all";
 
   const newSession = useCallback(async (hostId?: string) => {
     const hid = hostId ?? connectedHosts()[0]?.endpointId ?? null;
     const host = hid ? hostsRef.current.get(hid) : null;
     if (!host) return;
     setPickHost(false);
+    setEinstellungen(false);
+    setShowHosts(false);
     leaveSession();
     const token = navToken.current;
     setCreating(true);
@@ -683,11 +706,35 @@ export function App({ roam }: { roam: RoamClient }) {
     }
   }, [refreshSessions, leaveSession, connectedHosts]);
 
-  // One machine connected: start right away. Several: let the user pick.
+  // "Neu" always asks: here on the iPhone (direct), or on a connected machine.
   const startNew = useCallback(() => {
-    if (hostsRef.current.size > 1) setPickHost(true);
-    else void newSession();
-  }, [newSession]);
+    setPickHost(true);
+  }, []);
+
+  const openDirekt = useCallback((id: string) => {
+    setPickHost(false);
+    setEinstellungen(false);
+    setShowHosts(false);
+    leaveSession();
+    setDirektOffen(id);
+  }, [leaveSession]);
+
+  const newDirekt = useCallback(async () => {
+    try {
+      const c = await neuerDirektChat(STANDARD_MODELL);
+      await direkt.neuLaden();
+      openDirekt(c.id);
+      requestAnimationFrame(() => document.getElementById("direkt-input")?.focus());
+    } catch (err) {
+      setStatus(`Neuer Chat auf dem iPhone ging nicht: ${err}`);
+      setStatusKind("err");
+    }
+  }, [direkt, openDirekt]);
+
+  const openAny = useCallback((s: TaggedSession) => {
+    if (isDirekt(s)) openDirekt(s.sessionId);
+    else if (s._host) void openSessionRef.current(s._host, s.sessionId);
+  }, [openDirekt]);
 
   const openSession = useCallback(
     async (hostId: string, id: string, force = false, keepExternalGuard = false) => {
@@ -795,6 +842,9 @@ export function App({ roam }: { roam: RoamClient }) {
     },
     [push, leaveSession],
   );
+
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
 
   // Follow mode: the ACP server only streams updates to the connection that
   // sent the prompt (no multi-viewer broadcast yet). If someone else drives
@@ -1241,6 +1291,27 @@ export function App({ roam }: { roam: RoamClient }) {
     }
   }, [activeAgent]);
 
+  // Machine off: carry the chat on here, from what the phone remembers of it.
+  const cloneToPhone = useCallback(async () => {
+    const hid = activeHostRef.current;
+    const sid = sessionRef.current;
+    if (!hid || !sid) return;
+    setKlonFehler(null);
+    try {
+      const onScreen = cacheableItems(items as unknown as Array<{ kind: string } & Record<string, unknown>>);
+      const source = onScreen.some((i) => i.kind === "msg") ? onScreen : (loadChat(hid, sid) ?? []);
+      const info = sessions.find((x) => x._host === hid && x.sessionId === sid);
+      const c = await aufIphoneKlonen(info?.title || "Ohne Titel", source, {
+        hostLabel: hostLabel(hid, hosts.find((h) => h.endpointId === hid)?.name ?? "Rechner"),
+        sessionId: sid,
+      });
+      await direkt.neuLaden();
+      openDirekt(c.id);
+    } catch (err) {
+      setKlonFehler(err instanceof Error ? err.message : String(err));
+    }
+  }, [items, sessions, hosts, direkt, openDirekt]);
+
   const multiHost = hostChoices.length > 1;
   const currentInfo = sessions.find((x) => x._host === activeHostId && x.sessionId === sessionId);
   const composerLocked = (busy && !activeRun) || (externalActive && !externalOverride);
@@ -1270,14 +1341,23 @@ export function App({ roam }: { roam: RoamClient }) {
         build={BUILD}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         onNew={() => { setSidebarOpen(false); startNew(); }}
-        onHosts={() => { setSidebarOpen(false); setShowHosts((v) => !v); }}
+        onHosts={() => { setSidebarOpen(false); setEinstellungen(false); setShowHosts((v) => !v); }}
+        direkt
       />
 
-      {!connected && reconnecting && sessions.length === 0 ? (
-        // Re-dialing a known host (boot restore / dropped connection): a
-        // quiet holding screen instead of flashing the hosts page.
-        <ReconnectPanel onChooseOther={() => setReconnecting(false)} />
-      ) : (!connected && !reconnecting) || showHosts ? (
+      {einstellungen ? (
+        <DirektEinstellungen
+          tresorDa={direkt.tresorDa}
+          hinterlegt={direkt.hinterlegt}
+          fehlerhaft={direkt.fehlerhaft}
+          ausstehend={direkt.chats.filter((c) => c.spiegel === "ausstehend").length}
+          onSpeichern={direkt.speichern}
+          onEntfernen={direkt.entfernen}
+          onNachholen={() => void direkt.nachholen()}
+        />
+      ) : showHosts || (!connected && !reconnecting && addingHost) ? (
+        // Machines page. Without any machine the app no longer waits here:
+        // the chat list (with the iPhone's own chats) is the main view.
         <ConnectPanel
           hosts={hosts}
           addingHost={addingHost}
@@ -1308,34 +1388,53 @@ export function App({ roam }: { roam: RoamClient }) {
             onClose={() => setSidebarOpen(false)}
             creating={creating}
             onNew={() => { setSidebarOpen(false); startNew(); }}
-            hostChoices={hostChoices}
-            sessions={sessions}
+            hostChoices={listChoices}
+            sessions={allSessions}
             hostFilter={activeFilter}
             onHostFilter={setHostFilter}
             archiveFilter={archiveFilter}
             onArchiveFilter={setArchiveFilter}
-            groups={groupSessions(filterByArchive(filterByHost(sessions, activeFilter), archiveFilter), projects)}
+            groups={groupSessions(filterByArchive(filterByHost(allSessions, activeFilter), archiveFilter), projects)}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
-            activeSessionId={sessionId}
-            activeHostId={activeHostId}
-            onOpen={(s) => { setSidebarOpen(false); void openSession(s._host, s.sessionId); }}
+            activeSessionId={direktOffen ?? sessionId}
+            activeHostId={direktOffen ? IPHONE_HOST : activeHostId}
+            onOpen={(s) => { setSidebarOpen(false); openAny(s); }}
             footer={sidebarFooter}
           />
 
           <main id="chat" className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {sessionId === null ? (
+            {direktOffen ? (
+              <DirektChatAnsicht
+                key={direktOffen}
+                chatId={direktOffen}
+                schluessel={direkt.schluessel}
+                modelle={direkt.modelle}
+                onBack={() => setDirektOffen(null)}
+                onEinstellungen={() => { setDirektOffen(null); setEinstellungen(true); }}
+                onGeaendert={() => void direkt.neuLaden()}
+              />
+            ) : sessionId === null ? (
               <StartPage
                 hosts={connectedHosts().map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }))}
-                sessions={sessions}
+                sessions={allSessions}
                 creating={creating}
                 onNew={(hid) => void newSession(hid)}
-                onOpen={(s) => { if (s._host) void openSession(s._host, s.sessionId); }}
-                filterChoices={hostChoices}
+                onOpen={openAny}
+                filterChoices={listChoices}
                 filter={activeFilter}
                 onFilter={setHostFilter}
                 archiveFilter={archiveFilter}
                 onArchiveFilter={setArchiveFilter}
+                onNewDirekt={() => void newDirekt()}
+                direktHinweis={
+                  direkt.schluessel.mistral || direkt.schluessel.eurouter
+                    ? null
+                    : direkt.fehlerhaft.length
+                      ? "Der Mistral-Schluessel laesst sich nicht oeffnen. Unter Einstellungen neu eintragen."
+                      : "Einmal den Mistral-Schluessel unter Einstellungen eintragen, dann geht es ohne Rechner."
+                }
+                search
               />
             ) : (
             <>
@@ -1407,6 +1506,26 @@ export function App({ roam }: { roam: RoamClient }) {
                 }
               })}
               {loading && items.length > 0 && <RefreshingHint />}
+              {linkDown && !loading && (
+                <div id="klon-leiste" className="fade-in flex flex-col items-center gap-2 rounded-2xl bg-elevated px-4 py-3 text-center">
+                  <div className="text-[14px] text-ink-muted">
+                    {activeHostId ? hostLabel(activeHostId, "Der Rechner") : "Der Rechner"} ist gerade nicht erreichbar.
+                  </div>
+                  <button
+                    id="clone-to-iphone"
+                    type="button"
+                    onClick={() => void cloneToPhone()}
+                    className="flex min-h-11 items-center gap-2 rounded-xl bg-accent px-4 text-[15px] font-semibold text-accent-ink active:opacity-80"
+                  >
+                    <Smartphone size={18} aria-hidden /> Auf dem iPhone weiterfuehren
+                  </button>
+                  {klonFehler && (
+                    <div role="alert" className="text-[13px] text-danger">
+                      {klonFehler}
+                    </div>
+                  )}
+                </div>
+              )}
               {busy && (
                 <WorkingIndicator
                   steerable={!!activeRun}
@@ -1446,12 +1565,26 @@ export function App({ roam }: { roam: RoamClient }) {
           </main>
         </section>
       )}
-      {pickHost && connected && (
+      {pickHost && (
         <HostPicker
           hosts={connectedHosts().map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }))}
+          offline={hostChoices.filter((h) => !hostsRef.current.has(h.endpointId))}
           creating={creating}
           onPick={(hid) => void newSession(hid)}
+          onDirekt={() => void newDirekt()}
           onCancel={() => setPickHost(false)}
+        />
+      )}
+      {!direktOffen && sessionId === null && (
+        <UntereLeiste
+          aktiv={einstellungen ? "einstellungen" : showHosts || (!connected && !reconnecting && addingHost) ? "rechner" : "chats"}
+          hinweis={{ einstellungen: !direkt.schluessel.mistral && !direkt.schluessel.eurouter }}
+          onWahl={(b) => {
+            setSidebarOpen(false);
+            setEinstellungen(b === "einstellungen");
+            setShowHosts(b === "rechner");
+            if (b !== "rechner") setAddingHost(false);
+          }}
         />
       )}
     </div>
