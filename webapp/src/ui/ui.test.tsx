@@ -301,6 +301,44 @@ describe("HostPicker", () => {
   });
 });
 
+describe("HostPicker mit Direkt-Chat", () => {
+  it("fragt zuerst 'hier auf dem iPhone', dann 'auf Mac Mini/MacBook'; Rechner aus steht grau da", () => {
+    const onPick = vi.fn();
+    const onDirekt = vi.fn();
+    render(
+      <HostPicker
+        hosts={[{ endpointId: "m", label: "Mac Mini" }]}
+        offline={[{ endpointId: "b", label: "MacBook" }]}
+        creating={false}
+        onPick={onPick}
+        onDirekt={onDirekt}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText("Wo soll der neue Chat laufen?")).toBeTruthy();
+    const buttons = [...document.querySelectorAll("#host-picker button")].map((b) => b.textContent);
+    expect(buttons.slice(0, 2)).toEqual(["Hier auf dem iPhone (direkt)", "auf Mac Mini"]);
+    expect(document.querySelector(".pick-offline")!.textContent).toBe("MacBook ist gerade nicht erreichbar");
+    fireEvent.click(document.getElementById("pick-iphone")!);
+    expect(onDirekt).toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Mac Mini"));
+    expect(onPick).toHaveBeenCalledWith("m");
+  });
+});
+
+describe("AppHeader mit Direkt-Chat", () => {
+  it("Neu und Seitenleiste auch ohne Rechner", () => {
+    const onNew = vi.fn();
+    render(
+      <AppHeader connected={false} connecting={false} status="nicht verbunden" statusKind="idle" creating={false} hostCount={0} modelName={null} agentId="" build="t" onToggleSidebar={() => {}} onNew={onNew} onHosts={() => {}} direkt />,
+    );
+    fireEvent.click(document.getElementById("header-new-chat")!);
+    expect(onNew).toHaveBeenCalled();
+    expect(document.getElementById("sidebar-toggle")).not.toBeNull();
+    expect(document.getElementById("switch-host")).toBeNull();
+  });
+});
+
 describe("ConnectPanel", () => {
   const MINI_ID = "19736644c81a262765fa4dc07f6d265769d45bcd105ba7fee65ec6b5bb9cb893";
   function setup(props: Partial<Parameters<typeof ConnectPanel>[0]> = {}) {

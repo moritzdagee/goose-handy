@@ -20,6 +20,18 @@ export function newSessionMeta(): { hostSubdir: string; client: string } {
   return { hostSubdir: PHONE_FOLDER, client: PHONE_CLIENT };
 }
 
+// Chats, die das iPhone selbst fuehrt (Direkt-Chat mit Mistral, 29.10.2026).
+// In den Listen stehen sie wie ein weiterer "Rechner" mit dieser Kennung.
+export const IPHONE_HOST = "iphone";
+export const IPHONE_GROUP = "Auf dem iPhone";
+
+/** Zusatz eines Direkt-Chats fuer die Listen (Klon-Herkunft, wartende Fragen). */
+export type DirektInfo = { herkunft: string | null; wartet: number };
+
+export function isDirekt(s: { _host: string }): boolean {
+  return s._host === IPHONE_HOST;
+}
+
 export function isPhoneStarted(s: { cwd?: string | null }): boolean {
   const parts = (s.cwd ?? "").replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] === PHONE_FOLDER;
@@ -141,10 +153,13 @@ export function groupSessions(
 ): SessionGroup[] {
   const loose: TaggedSession[] = [];
   const phone: TaggedSession[] = [];
+  const iphone: TaggedSession[] = [];
   const byProject = new Map<string, TaggedSession[]>();
   for (const s of sessions) {
     const pid = sessionProjectId(s);
-    if (!pid) {
+    if (isDirekt(s)) {
+      iphone.push(s);
+    } else if (!pid) {
       (isPhoneStarted(s) ? phone : loose).push(s);
     } else {
       const key = `${s._host}:${pid}`;
@@ -154,6 +169,7 @@ export function groupSessions(
     }
   }
   const out: SessionGroup[] = [];
+  if (iphone.length) out.push({ key: "~iphone", label: IPHONE_GROUP, sessions: iphone });
   if (loose.length) out.push({ key: "~", label: "chats", sessions: loose });
   if (phone.length) out.push({ key: "~phone", label: PHONE_FOLDER, sessions: phone });
   const named = [...byProject.entries()].map(([key, group]) => ({

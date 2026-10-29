@@ -28,6 +28,9 @@ import { shouldRelock } from "./lock";
 // screen; a turn already sent keeps running on the Mac meanwhile.
 function Gate() {
   const [roam, setRoam] = useState<RoamClient | null>(null);
+  // Key for the vault of the direct chat's secrets (Mistral, Datenbank):
+  // only in memory, only after Face ID, gone with the next lock.
+  const [vault, setVault] = useState<CryptoKey | null>(null);
   useEffect(() => {
     let hiddenAt: number | null = null;
     const onVisibility = () => {
@@ -46,11 +49,12 @@ function Gate() {
     return (
       <LockScreen
         newSecret={() => new RoamClient(undefined).secretHex()}
+        onVault={setVault}
         onUnlocked={(secret) => setRoam(new RoamClient(secret))}
       />
     );
   }
-  return <App roam={roam} />;
+  return <App roam={roam} tresor={vault} />;
 }
 
 async function boot() {
