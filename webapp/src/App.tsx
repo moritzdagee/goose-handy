@@ -18,8 +18,6 @@ import {
 } from "@agentclientprotocol/sdk";
 import { GooseClient } from "@aaif/goose-sdk";
 import jsQR from "jsqr";
-import { Button } from "@desktop/components/ui/button";
-import { ChevronDown, ChevronLeft, ChevronRight, Menu, Paperclip, Plus, SlidersHorizontal, Square, X } from "lucide-react";
 import { StartPage } from "./StartPage";
 import { readAttachment, promptBlocks, promptPreview, type Attachment } from "./attachments";
 import {
@@ -32,9 +30,7 @@ import {
   retryDelay,
   withTimeout,
 } from "./reconnect";
-import MarkdownContent from "@desktop/components/MarkdownContent";
-import { Goose } from "@desktop/components/icons/Goose";
-import { ToolCallStatusIndicator, type ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
+import type { ToolCallStatus } from "@desktop/components/ToolCallStatusIndicator";
 import type { RoamClient } from "./wasm/goose_roaming_web.js";
 import { roamByteStreams } from "./roam-stream.js";
 import { continuesBubble, joinChunk } from "./chunks";
@@ -75,32 +71,13 @@ import {
   saveSessions as saveCachedSessions,
   type CachedItem,
 } from "./cache";
-import { HostFilterBar } from "./HostFilterBar";
-import { ArchiveFilterBar } from "./ArchiveFilterBar";
 import { ConnectPanel } from "./ConnectPanel";
+import { AppHeader, ChatTopBar, HostPicker, ReconnectPanel, Sidebar, type ConfigSelect } from "./ui/Shell";
+import { AgentMessage, PermCard, PlanCard, RefreshingHint, SystemLine, ThoughtBlock, ToolRow, UserBubble, WorkingIndicator } from "./ui/ChatItems";
+import { Composer } from "./ui/Composer";
+import { Skeleton, isLive } from "./ui/Primitives";
 
-type PermOption = { optionId: string; name: string; kind: string };
-
-type Item =
-  | { kind: "msg"; id: number; role: "user" | "agent" | "thought"; text: string }
-  | { kind: "system"; id: number; text: string }
-  | {
-      kind: "tool";
-      id: number;
-      toolCallId: string;
-      title: string;
-      status: ToolCallStatus;
-      output: string;
-    }
-  | { kind: "plan"; id: number; entries: PlanEntry[] }
-  | {
-      kind: "perm";
-      id: number;
-      title: string;
-      options: PermOption[];
-      chosen: string | null;
-      resolve: (optionId: string | null) => void;
-    };
+import type { Item } from "./items";
 
 const ACP_TOOL_STATUS: Record<string, ToolCallStatus> = {
   pending: "pending",
@@ -108,40 +85,6 @@ const ACP_TOOL_STATUS: Record<string, ToolCallStatus> = {
   completed: "success",
   failed: "error",
 };
-
-function ToolRow({ item }: { item: Extract<Item, { kind: "tool" }> }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="tool w-full">
-      <Button
-        onClick={() => setOpen((v) => !v)}
-        variant="ghost"
-        className="group w-full flex justify-between items-center pr-2 transition-colors rounded-none h-8 px-2"
-      >
-        <span className="flex items-center gap-2 font-sans text-sm truncate flex-1 min-w-0 text-text-secondary">
-          <span className="relative inline-block w-2.5 shrink-0">
-            <ToolCallStatusIndicator status={item.status} className="static" />
-          </span>
-          <span className="truncate">{item.title}</span>
-        </span>
-        <ChevronRight
-          className={`w-4 h-4 shrink-0 opacity-70 group-hover:opacity-100 transition-transform ${open ? "rotate-90" : ""}`}
-        />
-      </Button>
-      {open && (
-        <div className="border-t border-border-primary px-2 py-2">
-          {item.output ? (
-            <pre className="bg-background-secondary rounded-lg p-2.5 overflow-x-auto max-h-80 overflow-y-auto font-mono text-xs whitespace-pre-wrap break-words">
-              {item.output}
-            </pre>
-          ) : (
-            <div className="text-xs text-text-tertiary px-1">no output yet</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function contentText(content: unknown): string {
   const c = content as { type?: string; text?: string } | undefined;
@@ -163,38 +106,6 @@ type ConfigOption = {
   currentValue?: string | boolean;
   options?: ConfigSelectOption[];
 };
-
-// "just now", "4m", "2h", "3d" — compact relative time for session rows.
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (secs < 60) return "just now";
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-// Same liveness rule the constellation and hot chip use: updated <5 min ago.
-function isSessionLive(s: { updatedAt?: string | null }): boolean {
-  return !!s.updatedAt && Date.now() - new Date(s.updatedAt).getTime() < 5 * 60 * 1000;
-}
-
-// Ticking elapsed readout for the working indicator ("12s", "1m 04s").
-function LiveElapsed({ startedAt }: { startedAt: number }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const secs = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  const label =
-    secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
-  return (
-    <span className="font-mono tabular-nums text-text-tertiary" id="turn-elapsed">
-      {label}
-    </span>
-  );
-}
 
 function flatSelectOptions(opt: ConfigOption): ConfigSelectOption[] {
   return (opt.options ?? []).flatMap((x) => (x.options ? x.options : [x]));
@@ -397,7 +308,7 @@ export function App({ roam }: { roam: RoamClient }) {
       void tick();
     } catch (err) {
       setScanning(false);
-      setStatus(`camera unavailable: ${err}`);
+      setStatus(`Kamera nicht verfuegbar: ${err}`);
       setStatusKind("err");
     }
   }, []);
@@ -854,7 +765,7 @@ export function App({ roam }: { roam: RoamClient }) {
           buf.unshift({
             kind: "system",
             id: nextId++,
-            text: `… ${skipped} earlier messages not shown`,
+            text: `… ${skipped} fruehere Nachrichten nicht gezeigt`,
           });
         }
         setItems(buf);
@@ -871,7 +782,7 @@ export function App({ roam }: { roam: RoamClient }) {
           void redialAllRef.current();
           return;
         }
-        push({ kind: "system", text: `could not load session: ${err}` } as Omit<Item, "id">);
+        push({ kind: "system", text: `Konnte den Chat nicht laden: ${err}` } as Omit<Item, "id">);
         setStatus("connected");
         setStatusKind("ok");
       } finally {
@@ -1065,7 +976,7 @@ export function App({ roam }: { roam: RoamClient }) {
         // nothing is connected; otherwise the other machine keeps working.
         if (hostsRef.current.size === 0) {
           setReconnecting(false);
-          setStatus(`connect failed: ${err}`);
+          setStatus(`Verbinden ging nicht: ${err}`);
           setStatusKind("err");
           setAddingHost(true);
           setPairOpen(true);
@@ -1075,13 +986,13 @@ export function App({ roam }: { roam: RoamClient }) {
           // Nothing reachable after a few tries: show the hosts page with the
           // reason, retries keep running behind it.
           setReconnecting(false);
-          setStatus(`connect failed: ${err}`);
+          setStatus(`Verbinden ging nicht: ${err}`);
           setStatusKind("err");
         }
         scheduleReconnect(text, hint);
       } else {
         setReconnecting(false);
-        setStatus(`connect failed: ${err}`);
+        setStatus(`Verbinden ging nicht: ${err}`);
         setStatusKind("err");
       }
     } finally {
@@ -1205,7 +1116,7 @@ export function App({ roam }: { roam: RoamClient }) {
       const m = modelFromConfigOptions(opts);
       if (m) setModelName(m);
     } catch (err) {
-      push({ kind: "system", text: `could not set ${configId}: ${err}` } as Omit<Item, "id">);
+      push({ kind: "system", text: `Konnte ${configId} nicht setzen: ${err}` } as Omit<Item, "id">);
     }
   }, [activeAgent, push]);
 
@@ -1256,7 +1167,7 @@ export function App({ roam }: { roam: RoamClient }) {
         await steer(sid, blocks, runId);
         // pickup echoes back as a user_message_chunk; no local append needed
       } catch (err) {
-        push({ kind: "system", text: `steer failed: ${err}` } as Omit<Item, "id">);
+        push({ kind: "system", text: `Nachschieben ging nicht: ${err}` } as Omit<Item, "id">);
       }
       inputRef.current?.focus();
       return;
@@ -1285,12 +1196,12 @@ export function App({ roam }: { roam: RoamClient }) {
         // A loop driven elsewhere owns this session — queue into it instead.
         try {
           await steer(sid, blocks, bounce[1]);
-          push({ kind: "system", text: "queued into the running turn" } as Omit<Item, "id">);
+          push({ kind: "system", text: "an den laufenden Auftrag angehaengt" } as Omit<Item, "id">);
         } catch (err2) {
-          push({ kind: "system", text: `steer failed: ${err2}` } as Omit<Item, "id">);
+          push({ kind: "system", text: `Nachschieben ging nicht: ${err2}` } as Omit<Item, "id">);
         }
       } else {
-        push({ kind: "system", text: `error: ${err}` } as Omit<Item, "id">);
+        push({ kind: "system", text: `Fehler: ${err}` } as Omit<Item, "id">);
       }
     } finally {
       if (navToken.current === token) {
@@ -1330,92 +1241,42 @@ export function App({ roam }: { roam: RoamClient }) {
     }
   }, [activeAgent]);
 
-  const statusColor =
-    statusKind === "ok"
-      ? "text-text-success"
-      : statusKind === "err"
-        ? "text-text-danger"
-        : statusKind === "busy"
-          ? "text-text-info"
-          : "text-text-secondary";
+  const multiHost = hostChoices.length > 1;
+  const currentInfo = sessions.find((x) => x._host === activeHostId && x.sessionId === sessionId);
+  const composerLocked = (busy && !activeRun) || (externalActive && !externalOverride);
+  const selectConfig: ConfigSelect[] = configOptions
+    .filter((o) => o.type === "select")
+    .map((o) => ({
+      id: o.id,
+      name: o.name,
+      value: typeof o.currentValue === "string" ? o.currentValue : "",
+      options: flatSelectOptions(o).map((v) => ({ id: v.id, name: v.name })),
+    }));
+  const sidebarFooter = [modelName, relay ? `ueber Relais ${relay}` : null, agentId ? `Rechner ${agentId.slice(0, 8)}` : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background-primary text-text-primary pb-[env(safe-area-inset-bottom)]">
-      <div className="flex items-center justify-between gap-2 px-3 md:px-4 py-2.5 bg-background-secondary shrink-0">
-        <div className="flex items-center gap-2 shrink-0">
-          {(connected || reconnecting) && (
-            <button
-              id="sidebar-toggle"
-              className="md:hidden text-text-secondary px-1"
-              aria-label="toggle sessions"
-              onClick={() => setSidebarOpen((v) => !v)}
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-          )}
-          <Goose className="w-5 h-5" />
-          <span className="font-bold text-[15px] whitespace-nowrap">goose</span>
-          <span id="build-stamp" className="hidden md:inline text-[10px] text-text-tertiary font-mono self-end pb-0.5">{BUILD}</span>
-        </div>
-        <div className="flex items-center gap-2.5 min-w-0 shrink">
-          {connected && modelName && (
-            <span
-              id="model-badge"
-              className="hidden md:inline text-[11px] text-text-secondary bg-background-tertiary rounded-full px-2.5 py-0.5"
-            >
-              {modelName}
-            </span>
-          )}
-          {connected && (
-            <span
-              id="agent-badge"
-              className="hidden md:inline font-mono text-[11px] text-text-secondary bg-background-tertiary rounded-full px-2.5 py-0.5"
-            >
-              agent {agentId.slice(0, 12)}…
-            </span>
-          )}
-          <span id="status" className={`flex items-center gap-1.5 text-[11px] whitespace-nowrap ${statusColor}`}>
-            <span aria-hidden className="inline-block w-2 h-2 rounded-full bg-current shrink-0" />
-            <span className={connected ? "hidden md:inline" : "truncate max-w-[180px] md:max-w-none"}>{status}</span>
-          </span>
-          {connected && (
-            <button
-              id="header-new-chat"
-              disabled={creating}
-              onClick={() => { setSidebarOpen(false); startNew(); }}
-              className="shrink-0 inline-flex items-center gap-1 bg-background-inverse text-text-inverse text-xs font-semibold rounded-lg px-2.5 py-1.5 hover:brightness-110 disabled:opacity-50"
-            >
-              <Plus className="w-3.5 h-3.5" /> Neu
-            </button>
-          )}
-          {connected && (
-            <button
-              id="switch-host"
-              className="shrink-0 text-xs text-text-secondary rounded-lg px-2.5 py-1 hover:bg-background-tertiary hover:text-text-primary transition-colors"
-              title="connect more hosts — sessions from every connected host share one list"
-              onClick={() => setShowHosts((v) => !v)}
-            >
-              hosts{hostsRef.current.size > 1 ? ` · ${hostsRef.current.size}` : ""}
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="flex h-[100dvh] flex-col bg-canvas text-ink">
+      <AppHeader
+        connected={connected}
+        connecting={reconnecting || dialCount > 0}
+        status={status}
+        statusKind={statusKind}
+        creating={creating}
+        hostCount={hostsRef.current.size}
+        modelName={modelName}
+        agentId={agentId}
+        build={BUILD}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        onNew={() => { setSidebarOpen(false); startNew(); }}
+        onHosts={() => { setSidebarOpen(false); setShowHosts((v) => !v); }}
+      />
 
       {!connected && reconnecting && sessions.length === 0 ? (
         // Re-dialing a known host (boot restore / dropped connection): a
         // quiet holding screen instead of flashing the hosts page.
-        <section id="reconnect-panel" className="flex-1 grid place-items-center p-6">
-          <div className="flex flex-col items-center gap-3 text-text-secondary">
-            <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-            <div className="text-sm">connecting…</div>
-            <button
-              className="text-xs underline underline-offset-2 hover:text-text-primary"
-              onClick={() => setReconnecting(false)}
-            >
-              choose a different host
-            </button>
-          </div>
-        </section>
+        <ReconnectPanel onChooseOther={() => setReconnecting(false)} />
       ) : (!connected && !reconnecting) || showHosts ? (
         <ConnectPanel
           hosts={hosts}
@@ -1441,79 +1302,28 @@ export function App({ roam }: { roam: RoamClient }) {
           videoRef={videoRef}
         />
       ) : (
-        <section id="workspace" className="flex-1 relative md:grid md:grid-cols-[240px_1fr] flex min-h-0">
-          <aside
-            className={`${sidebarOpen ? "flex" : "hidden"} md:flex absolute md:static inset-y-0 left-0 z-20 w-[240px] shadow-lg md:shadow-none bg-background-secondary py-3 flex-col gap-2.5 min-h-0`}
-          >
-            <button
-              id="new-session"
-              disabled={creating}
-              onClick={() => { setSidebarOpen(false); startNew(); }}
-              className="mx-3 bg-background-inverse text-text-inverse font-semibold rounded-lg px-3 py-1.5 hover:brightness-110 disabled:opacity-50"
-            >
-              + Neuer Chat
-            </button>
-            <div className="mx-3">
-              <HostFilterBar choices={hostChoices} sessions={sessions} value={activeFilter} onChange={setHostFilter} />
-              <div className="mt-1.5">
-                <ArchiveFilterBar sessions={filterByHost(sessions, activeFilter)} value={archiveFilter} onChange={setArchiveFilter} />
-              </div>
-            </div>
-            <div id="session-list" className="overflow-y-auto flex flex-col">
-              {groupSessions(filterByArchive(filterByHost(sessions, activeFilter), archiveFilter), projects).map(({ key, label, sessions: group }) => (
-                <div key={key} className="flex flex-col">
-                  {label !== null && (
-                    <button
-                      className="project-label flex items-center gap-1 text-[10px] uppercase tracking-wide text-text-tertiary px-3 pt-1 pb-0.5 hover:text-text-secondary"
-                      onClick={() => toggleGroup(key)}
-                      aria-expanded={!collapsed.has(key)}
-                    >
-                      <ChevronDown
-                        size={12}
-                        className={`shrink-0 transition-transform duration-150 ${collapsed.has(key) ? "-rotate-90" : ""}`}
-                      />
-                      <span className="truncate">{label}</span>
-                      <span className="font-normal normal-case tracking-normal">({group.length})</span>
-                    </button>
-                  )}
-                  {(label === null || !collapsed.has(key)) && group.map((s) => (
-                    <button
-                      key={`${s._host}|${s.sessionId}`}
-                      className={`session-item text-left w-full px-3 py-2 border-l-2 transition-colors duration-150 ${
-                        s.sessionId === sessionId && s._host === activeHostId
-                          ? "bg-background-tertiary border-border-info"
-                          : "border-transparent hover:bg-background-tertiary"
-                      }`}
-                      onClick={() => { setSidebarOpen(false); void openSession(s._host, s.sessionId); }}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {isSessionLive(s) && (
-                          <span
-                            className="shrink-0 inline-block w-1.5 h-1.5 rounded-full bg-text-info animate-pulse"
-                            title="active in the last 5 minutes"
-                          />
-                        )}
-                        <span className="text-[13px] whitespace-nowrap overflow-hidden text-ellipsis">
-                          {s.title || "(untitled session)"}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-text-tertiary mt-0.5">
-                        {relativeTime(s.updatedAt)}
-                        {activeFilter === "all" && hostChoices.length > 1 && (
-                          <span className="text-text-info"> · {hostLabel(s._host, s._host.slice(0, 6))}</span>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="mt-auto px-3 pt-2 text-[10px] text-text-tertiary font-mono truncate">
-              {modelName ? `${modelName} · ` : ""}{relay ? `via relay ${relay} · ` : ""}agent {agentId.slice(0, 8)}
-            </div>
-          </aside>
+        <section id="workspace" className="relative flex min-h-0 flex-1 md:grid md:grid-cols-[280px_1fr]">
+          <Sidebar
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            creating={creating}
+            onNew={() => { setSidebarOpen(false); startNew(); }}
+            hostChoices={hostChoices}
+            sessions={sessions}
+            hostFilter={activeFilter}
+            onHostFilter={setHostFilter}
+            archiveFilter={archiveFilter}
+            onArchiveFilter={setArchiveFilter}
+            groups={groupSessions(filterByArchive(filterByHost(sessions, activeFilter), archiveFilter), projects)}
+            collapsed={collapsed}
+            onToggleGroup={toggleGroup}
+            activeSessionId={sessionId}
+            activeHostId={activeHostId}
+            onOpen={(s) => { setSidebarOpen(false); void openSession(s._host, s.sessionId); }}
+            footer={sidebarFooter}
+          />
 
-          <main id="chat" className="flex flex-col min-h-0 flex-1 min-w-0">
+          <main id="chat" className="flex min-h-0 min-w-0 flex-1 flex-col">
             {sessionId === null ? (
               <StartPage
                 hosts={connectedHosts().map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }))}
@@ -1529,89 +1339,24 @@ export function App({ roam }: { roam: RoamClient }) {
               />
             ) : (
             <>
-            <div className="shrink-0 px-3 md:px-6 pt-2 flex items-center gap-2 min-w-0">
-              <button
-                id="back-to-matrix"
-                onClick={leaveSession}
-                className="shrink-0 inline-flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" /> Chats
-              </button>
-              <span className="text-xs text-text-tertiary truncate">
-                {sessions.find((x) => x._host === activeHostId && x.sessionId === sessionId)?.title ?? ""}
-                {hostsRef.current.size > 1 && activeHostId && (
-                  <span className="text-text-info"> · {hostsRef.current.get(activeHostId)?.name ?? ""}</span>
-                )}
-              </span>
-              {(() => {
-                const cur = sessions.find((x) => x._host === activeHostId && x.sessionId === sessionId);
-                const hot =
-                  cur?.updatedAt &&
-                  Date.now() - new Date(cur.updatedAt).getTime() < 5 * 60 * 1000;
-                return hot ? (
-                  <span
-                    id="hot-chip"
-                    title="active in the last 5 min — checked every 6s"
-                    className="shrink-0 inline-flex items-center gap-1 text-[10px] text-text-info"
-                  >
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                    live
-                  </span>
-                ) : null;
-              })()}
-              <span className="flex-1" />
-              {configOptions.length > 0 && (
-                <button
-                  id="session-config-btn"
-                  aria-label="session settings"
-                  title="session settings — model, mode, provider"
-                  className={`shrink-0 p-1 rounded-md transition-colors ${
-                    showConfig
-                      ? "text-text-primary bg-background-tertiary"
-                      : "text-text-secondary hover:text-text-primary"
-                  }`}
-                  onClick={() => setShowConfig((v) => !v)}
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            {showConfig && (
-              <div
-                id="session-config"
-                className="shrink-0 bg-background-secondary px-3 md:px-6 py-3"
-              >
-                <div className="max-w-3xl mx-auto w-full grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5">
-                  {configOptions
-                    .filter((o) => o.type === "select")
-                    .map((o) => (
-                      <label key={o.id} className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] uppercase tracking-wide text-text-tertiary">
-                          {o.name}
-                        </span>
-                        <select
-                          className="w-full bg-background-primary rounded-lg px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
-                          value={typeof o.currentValue === "string" ? o.currentValue : ""}
-                          disabled={busy && !activeRun}
-                          onChange={(e) => void setConfigOption(o.id, e.target.value)}
-                        >
-                          {flatSelectOptions(o).map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            )}
-            <div ref={logRef} id="log" className="flex-1 overflow-y-auto px-3 md:px-6 py-4 md:py-5">
-              <div className="max-w-3xl mx-auto w-full flex flex-col gap-4 pb-2">
+            <ChatTopBar
+              title={currentInfo?.title || (loading ? "" : "(ohne Titel)")}
+              hostName={multiHost && activeHostId ? hostLabel(activeHostId, hostsRef.current.get(activeHostId)?.name ?? activeHostId.slice(0, 6)) : null}
+              live={isLive(currentInfo?.updatedAt)}
+              config={selectConfig}
+              configDisabled={busy && !activeRun}
+              open={showConfig}
+              onToggleConfig={() => setShowConfig((v) => !v)}
+              onBack={leaveSession}
+              onConfig={(id, value) => void setConfigOption(id, value)}
+            />
+            <div ref={logRef} id="log" className="flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+              <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-2">
               {items.length > logWindow && (
                 <button
                   id="show-earlier"
-                  className="self-center text-xs text-text-secondary rounded-lg px-3 py-1.5 bg-background-secondary hover:bg-background-tertiary transition-colors"
+                  type="button"
+                  className="min-h-11 self-center rounded-full bg-elevated px-4 text-[14px] text-ink-muted"
                   onClick={() => {
                     const el = logRef.current;
                     const prevH = el?.scrollHeight ?? 0;
@@ -1621,296 +1366,93 @@ export function App({ roam }: { roam: RoamClient }) {
                     });
                   }}
                 >
-                  show earlier · {items.length - logWindow} more
+                  Fruehere zeigen · {items.length - logWindow} weitere
                 </button>
+              )}
+              {loading && items.length === 0 && (
+                <div aria-hidden className="flex flex-col gap-4">
+                  <Skeleton className="ml-auto h-12 w-2/3 rounded-[20px]" />
+                  <Skeleton className="h-4 w-11/12 rounded-md" />
+                  <Skeleton className="h-4 w-4/5 rounded-md" />
+                  <Skeleton className="h-4 w-3/5 rounded-md" />
+                </div>
               )}
               {items.slice(-logWindow).map((it) => {
                 switch (it.kind) {
                   case "system":
-                    return (
-                      <div key={it.id} className="msg system self-center text-text-secondary text-xs">
-                        {it.text}
-                      </div>
-                    );
+                    return <SystemLine key={it.id} text={it.text} />;
                   case "msg":
-                    if (it.role === "thought")
-                      return (
-                        <details
-                          key={it.id}
-                          className="msg thought bg-background-secondary rounded-lg px-3 py-1.5 text-[13px] text-text-secondary"
-                        >
-                          <summary className="cursor-pointer italic text-text-tertiary">
-                            thinking
-                          </summary>
-                          <div className="body mt-1.5 whitespace-pre-wrap">{it.text}</div>
-                        </details>
-                      );
-                    // Mirror the desktop's presentation (UserMessage /
-                    // GooseMessage): user prompts are right-aligned inverse
-                    // bubbles; goose replies are plain left-aligned content.
-                    if (it.role === "user")
-                      return (
-                        <div key={it.id} className="msg user flex justify-end w-full">
-                          <div className="body user-message-bubble max-w-[92%] md:max-w-[85%] w-fit min-w-0 bg-text-primary text-background-primary rounded-xl py-2.5 px-4 whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">
-                            {it.text}
-                          </div>
-                        </div>
-                      );
-                    return (
-                      <div key={it.id} className="msg agent goose-message flex w-full md:w-[90%] justify-start min-w-0">
-                        <div className="body min-w-0 flex-1 leading-relaxed">
-                          <MarkdownContent content={it.text} />
-                        </div>
-                      </div>
-                    );
+                    if (it.role === "thought") return <ThoughtBlock key={it.id} text={it.text} />;
+                    if (it.role === "user") return <UserBubble key={it.id} text={it.text} />;
+                    return <AgentMessage key={it.id} text={it.text} />;
                   case "tool":
-                    return <ToolRow key={it.id} item={it} />;
+                    return <ToolRow key={it.id} title={it.title} status={it.status} output={it.output} />;
                   case "plan":
-                    return (
-                      <div
-                        key={it.id}
-                        className="plan mt-1 rounded-lg bg-background-secondary px-3.5 py-2.5"
-                      >
-                        <div className="text-xs text-text-secondary uppercase tracking-wider mb-1.5">
-                          Plan
-                        </div>
-                        {it.entries.map((e, i) => (
-                          <div key={i} className="flex gap-2 py-0.5 text-[13px]">
-                            <span className="text-text-secondary">
-                              {e.status === "completed" ? "☑" : e.status === "in_progress" ? "▸" : "☐"}
-                            </span>
-                            <span
-                              className={
-                                e.status === "completed"
-                                  ? "text-text-tertiary line-through"
-                                  : "text-text-primary"
-                              }
-                            >
-                              {e.content}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    );
+                    return <PlanCard key={it.id} entries={it.entries} />;
                   case "perm":
                     return (
-                      <div
+                      <PermCard
                         key={it.id}
-                        className="perm mt-1 rounded-lg bg-background-warning px-3.5 py-2.5"
-                      >
-                        <div className="text-[13px] text-text-warning mb-2">
-                          🔐 {it.title} needs permission
-                        </div>
-                        {it.chosen ? (
-                          <span className="text-xs text-text-secondary">→ {it.chosen}</span>
-                        ) : (
-                          <div className="perm-actions flex gap-2 flex-wrap">
-                            {it.options.map((o) => (
-                              <button
-                                key={o.optionId}
-                                className={
-                                  o.kind.startsWith("allow")
-                                    ? "primary bg-background-inverse text-text-inverse font-semibold rounded-lg px-3 py-1 text-[13px]"
-                                    : "bg-background-secondary text-text-secondary rounded-lg px-3 py-1 text-[13px] hover:bg-background-tertiary"
-                                }
-                                onClick={() => {
-                                  it.resolve(o.optionId);
-                                  setItems((xs) =>
-                                    xs.map((x) =>
-                                      x.id === it.id && x.kind === "perm"
-                                        ? { ...x, chosen: o.name }
-                                        : x,
-                                    ),
-                                  );
-                                }}
-                              >
-                                {o.name}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                        title={it.title}
+                        options={it.options}
+                        chosen={it.chosen}
+                        onChoose={(o) => {
+                          it.resolve(o.optionId);
+                          setItems((xs) =>
+                            xs.map((x) => (x.id === it.id && x.kind === "perm" ? { ...x, chosen: o.name } : x)),
+                          );
+                        }}
+                      />
                     );
                 }
               })}
-              {loading && items.length > 0 && (
-                <div id="chat-refreshing" className="msg system self-center flex items-center gap-2 text-text-tertiary text-[11px]">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                  aktualisiere…
-                </div>
-              )}
+              {loading && items.length > 0 && <RefreshingHint />}
               {busy && (
-                <div className="msg system self-center flex items-center gap-2.5 text-text-secondary text-xs">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                  <span>{activeRun ? "goose is working — you can steer" : "goose is working…"}</span>
-                  {turnStartedAt && <LiveElapsed startedAt={turnStartedAt} />}
-                  {turnStartedAt && (
-                    <button
-                      id="stop-turn"
-                      type="button"
-                      disabled={cancelling}
-                      onClick={() => void cancelTurn()}
-                      className="inline-flex items-center gap-1 bg-background-secondary rounded-md px-2 py-0.5 text-[11px] hover:text-text-warning transition-colors disabled:opacity-50"
-                    >
-                      <Square className="w-2.5 h-2.5 fill-current" />
-                      {cancelling ? "stopping…" : "stop"}
-                    </button>
-                  )}
-                </div>
+                <WorkingIndicator
+                  steerable={!!activeRun}
+                  startedAt={turnStartedAt}
+                  cancelling={cancelling}
+                  onStop={() => void cancelTurn()}
+                />
               )}
               </div>
             </div>
-            <form
-              id="prompt-form"
-              className="px-3 md:px-6 pb-3 pt-1"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void send();
-              }}
-            >
-              {linkDown && (
-                <div
-                  id="link-down"
-                  className="max-w-3xl mx-auto w-full mb-1.5 flex items-center gap-2 text-[11px] text-text-warning rounded-lg bg-background-secondary px-3 py-1.5"
-                >
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
-                  <span className="flex-1 min-w-0">
-                    Verbindung zu {activeHostId ? hostLabel(activeHostId, "") : "dem Rechner"} wird wiederhergestellt… Goose arbeitet dort weiter.
-                  </span>
-                </div>
-              )}
-              {externalActive && !externalOverride && (
-                <div
-                  id="external-run-guard"
-                  className="max-w-3xl mx-auto w-full mb-1.5 flex items-center gap-2 text-[11px] text-text-warning rounded-lg bg-background-secondary px-3 py-1.5"
-                >
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
-                  <span className="flex-1 min-w-0">
-                    active in another goose (desktop or CLI) — sending from here may start a second loop
-                  </span>
-                  <button
-                    id="external-run-override"
-                    type="button"
-                    className="shrink-0 text-[11px] underline underline-offset-2 hover:text-text-primary"
-                    onClick={() => setExternalOverride(true)}
-                  >
-                    send anyway
-                  </button>
-                </div>
-              )}
-              {(pending.length > 0 || attachError) && (
-                <div id="attachments" className="max-w-3xl mx-auto w-full mb-1.5 flex flex-wrap gap-1.5">
-                  {pending.map((f, i) => (
-                    <span
-                      key={`${f.name}-${i}`}
-                      className="attachment-chip inline-flex items-center gap-1 text-[11px] bg-background-secondary rounded-full pl-2.5 pr-1 py-0.5 max-w-[220px]"
-                    >
-                      <span className="truncate">📎 {f.name}</span>
-                      <button
-                        type="button"
-                        aria-label={`${f.name} entfernen`}
-                        className="p-0.5 text-text-secondary hover:text-text-primary"
-                        onClick={() => setPending((xs) => xs.filter((_, j) => j !== i))}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                  {attachError && <span className="text-[11px] text-text-danger">{attachError}</span>}
-                </div>
-              )}
-              <input
-                ref={fileRef}
-                id="file-input"
-                type="file"
-                multiple
-                className="hidden"
-                onChange={async (e) => {
-                  const list = [...(e.target.files ?? [])];
-                  e.target.value = "";
-                  setAttachError(null);
-                  for (const f of list) {
-                    try {
-                      const a = await readAttachment(f);
-                      setPending((xs) => [...xs, a]);
-                    } catch (err) {
-                      setAttachError(String(err instanceof Error ? err.message : err));
-                    }
+            <Composer
+              inputRef={inputRef}
+              fileRef={fileRef}
+              linkDownHost={linkDown ? (activeHostId ? hostLabel(activeHostId, "") : "") : null}
+              externalGuard={externalActive && !externalOverride}
+              onSendAnyway={() => setExternalOverride(true)}
+              pending={pending}
+              onRemove={(i) => setPending((xs) => xs.filter((_, j) => j !== i))}
+              attachError={attachError}
+              onFiles={async (list) => {
+                setAttachError(null);
+                for (const f of list) {
+                  try {
+                    const a = await readAttachment(f);
+                    setPending((xs) => [...xs, a]);
+                  } catch (err) {
+                    setAttachError(String(err instanceof Error ? err.message : err));
                   }
-                }}
-              />
-              <div className="max-w-3xl mx-auto w-full flex gap-1.5 items-end rounded-xl bg-background-secondary focus-within:ring-2 focus-within:ring-border-info px-1.5 py-1 transition-shadow">
-              <button
-                id="attach-btn"
-                type="button"
-                aria-label="Datei oder Foto anhaengen"
-                disabled={(busy && !activeRun) || (externalActive && !externalOverride)}
-                onClick={() => fileRef.current?.click()}
-                className="shrink-0 p-2 mb-0.5 text-text-secondary hover:text-text-primary disabled:opacity-40"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <textarea
-                ref={inputRef}
-                id="prompt-input"
-                rows={1}
-                disabled={(busy && !activeRun) || (externalActive && !externalOverride)}
-                className="flex-1 outline-none border-none focus:ring-0 bg-transparent px-3 pt-2.5 pb-2 text-sm resize-none max-h-52 text-text-primary placeholder:text-text-secondary"
-                placeholder={
-                  externalActive && !externalOverride
-                    ? "Running in another goose — watching…"
-                    : activeRun
-                      ? "Steer the running turn…"
-                      : "Nachricht an goose…"
                 }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-              />
-              <button
-                id="send-btn"
-                type="submit"
-                disabled={(busy && !activeRun) || (externalActive && !externalOverride)}
-                className="bg-background-inverse text-text-inverse text-sm font-medium rounded-lg px-3.5 py-1.5 mb-0.5 mr-0.5 hover:brightness-110 disabled:opacity-50"
-              >
-                {activeRun ? "nachschieben" : "senden"}
-              </button>
-              </div>
-            </form>
+              }}
+              locked={composerLocked}
+              steering={!!activeRun}
+              onSubmit={() => void send()}
+            />
             </>
             )}
           </main>
         </section>
       )}
       {pickHost && connected && (
-        <div
-          id="host-picker"
-          className="fixed inset-0 z-40 bg-black/40 flex items-end md:items-center justify-center"
-          onClick={() => setPickHost(false)}
-        >
-          <div
-            className="w-full md:w-[360px] bg-background-primary rounded-t-2xl md:rounded-2xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-2.5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="text-sm font-semibold">Neuer Chat auf welchem Rechner?</div>
-            {connectedHosts().map((h) => (
-              <button
-                key={h.endpointId}
-                disabled={creating}
-                onClick={() => void newSession(h.endpointId)}
-                className="pick-host w-full bg-background-inverse text-text-inverse font-semibold rounded-xl px-4 py-3 hover:brightness-110 disabled:opacity-50"
-              >
-                {hostLabel(h.endpointId, h.name)}
-              </button>
-            ))}
-            <button className="text-xs text-text-secondary py-1" onClick={() => setPickHost(false)}>
-              abbrechen
-            </button>
-          </div>
-        </div>
+        <HostPicker
+          hosts={connectedHosts().map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }))}
+          creating={creating}
+          onPick={(hid) => void newSession(hid)}
+          onCancel={() => setPickHost(false)}
+        />
       )}
     </div>
   );

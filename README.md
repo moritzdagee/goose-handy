@@ -20,6 +20,14 @@ Home-Bildschirm").
 | eine gemischte Chat-Liste | Filter "Alle / Mac Mini / MacBook" (Startseite und Seitenleiste, mit Anzahl, auf dem Geraet gemerkt) |
 | neue Chats im Arbeitsordner des Rechners | neue Chats im Unterordner "Vom iPhone gestartet"; die Mac-App zeigt ihn als eigene, aufklappbare Rubrik, die Handy-App als eigene Gruppe |
 | Chat-Liste und Verlauf nur aus der Verbindung | Chat-Liste und die letzten 15 geoeffneten Chats bleiben auf dem Handy gespeichert und stehen nach dem Oeffnen sofort da |
+| Oberflaeche der Desktop-App, englisch, klein | eigene Gestaltung aus Lovable (Oktober 2026): dunkel als Standard, orange Akzentfarbe, grosse Tippflaechen, alles Deutsch |
+
+Gestaltung (seit 28.10.2026): entworfen im Lovable-Projekt "Goose iPhone Assistant"
+(https://lovable.dev/projects/905d7037-aa4a-4e12-b5c8-4ae24ce0b870, nur Beispieldaten) und von Hand
+in die bestehenden Bausteine uebernommen: `webapp/src/ui/` (Kopfleiste, Seitenleiste, Chat-Eintraege,
+Eingabefeld, Rechner-Auswahl), Farben als Variablen in `theme.css` (hell folgt der Systemeinstellung).
+Verbindung, Zwischenspeicher, Anhaenge und Face-ID-Sperre sind unveraendert; Kennungen und Klassen
+fuer Tests und Playwright-Skripte (`#prompt-input`, `.recent-chat`, `.msg.agent`, ...) sind geblieben.
 
 Verbindung (seit 15.10.2026): iOS friert die App ein, sobald sie vom Bildschirm verschwindet, und
 die Verbindungen sterben dabei, ohne dass die App es merkt. Beim Zurueckkehren (und wenn das Netz
