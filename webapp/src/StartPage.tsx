@@ -3,12 +3,14 @@
 // first thing wanted is almost always "ask something new".
 // Look: Lovable design (Oktober 2026), one big orange action per machine.
 import { useState } from "react";
-import { Laptop, Monitor, Search, Smartphone } from "lucide-react";
+import { Copy, Laptop, Monitor, Search, Smartphone } from "lucide-react";
 import {
   filterByArchive,
   filterByHost,
+  TABLET_HOST,
   isDirekt,
   isPhoneStarted,
+  isTablet,
   type ArchiveFilter,
   type DirektInfo,
   type HostFilter,
@@ -32,6 +34,7 @@ export function StartPage({
   onNewDirekt,
   direktHinweis = null,
   search = false,
+  tabletHinweis = null,
 }: {
   /** Machines connected right now: one "new chat" button each. */
   hosts: HostChoice[];
@@ -51,6 +54,8 @@ export function StartPage({
   direktHinweis?: string | null;
   /** Suchfeld ueber der Liste. */
   search?: boolean;
+  /** Satz ueber der Liste im Filter "Tablet" (Schluessel fehlt, offline ...). */
+  tabletHinweis?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const label = (eid: string) =>
@@ -142,16 +147,22 @@ export function StartPage({
               </label>
             )}
           </div>
+          {filter === TABLET_HOST && tabletHinweis && (
+            <div id="tablet-listen-hinweis" role="status" className="mx-4 mb-2 rounded-xl bg-warn/10 px-3 py-2 text-[13px] leading-snug text-warn">
+              {tabletHinweis}
+            </div>
+          )}
           {recent.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <div className="text-[15px] text-ink-muted">{q ? "nichts gefunden" : "noch keine"}</div>
-              <div className="mt-1 text-[13px] text-ink-faint">{q ? "Anderes Suchwort versuchen." : "Starte oben einen neuen Chat."}</div>
+              <div className="text-[15px] text-ink-muted">{q ? "nichts gefunden" : filter === TABLET_HOST ? "noch keine Tablet-Chats" : "noch keine"}</div>
+              <div className="mt-1 text-[13px] text-ink-faint">{q ? "Anderes Suchwort versuchen." : filter === TABLET_HOST ? "Sie erscheinen, sobald das Tablet sie in die Wissensdatenbank gespiegelt hat." : "Starte oben einen neuen Chat."}</div>
             </div>
           )}
           <div className="divide-y divide-line/60">
             {recent.map((s) => {
               const direkt = isDirekt(s) ? ((s as { _direkt?: DirektInfo })._direkt ?? null) : null;
-              const live = !isDirekt(s) && isLive(s.updatedAt);
+              const tablet = isTablet(s);
+              const live = !isDirekt(s) && !tablet && isLive(s.updatedAt);
               return (
                 <button
                   key={`${s._host}|${s.sessionId}`}
@@ -165,6 +176,15 @@ export function StartPage({
                     {showHost && (
                       <>
                         <span aria-hidden>·</span> <HostBadge name={label(s._host)} />
+                      </>
+                    )}
+                    {tablet && (
+                      <>
+                        <span aria-hidden>·</span>{" "}
+                        <Pill>
+                          <Copy size={11} aria-hidden />
+                          Kopie aus der Datenbank
+                        </Pill>
                       </>
                     )}
                     {direkt?.herkunft && (

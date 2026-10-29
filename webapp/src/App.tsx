@@ -50,7 +50,9 @@ import {
 } from "./hosts";
 import {
   IPHONE_HOST,
+  TABLET_HOST,
   isDirekt,
+  isTablet,
   newSessionMeta,
   filterByArchive,
   filterByHost,
@@ -83,6 +85,9 @@ import { IPHONE_LABEL, direktAlsSitzungen } from "./direkt/liste";
 import { neuerChat as neuerDirektChat } from "./direkt/speicher";
 import { aufIphoneKlonen } from "./direkt/klonen";
 import { STANDARD_MODELL } from "./direkt/anbieter";
+import { useTablet } from "./direkt/useTablet";
+import { TabletChatAnsicht } from "./direkt/TabletChatAnsicht";
+import { TABLET_LABEL, tabletAlsSitzungen, tabletHinweis } from "./direkt/tablet";
 import { Smartphone } from "lucide-react";
 import { AgentMessage, PermCard, PlanCard, RefreshingHint, SystemLine, ThoughtBlock, ToolRow, UserBubble, WorkingIndicator } from "./ui/ChatItems";
 import { Composer } from "./ui/Composer";
@@ -154,6 +159,9 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
   // Direkt-Chat auf dem iPhone (29.10.2026): Chats, Schluessel, Modelle.
   const direkt = useDirekt(tresor);
   const [direktOffen, setDirektOffen] = useState<string | null>(null);
+  // Tablet-Chats (Moose beta) als Kopie aus der Wissensdatenbank, nur lesen.
+  const tablet = useTablet(direkt.schluessel.kb);
+  const [tabletOffen, setTabletOffen] = useState<{ id: number; titel: string } | null>(null);
   const [einstellungen, setEinstellungen] = useState(false);
   const [klonFehler, setKlonFehler] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -170,10 +178,12 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
     setArchiveFilterState(f);
     saveArchiveFilter(f);
   }, []);
+  const tabletNeuLaden = tablet.neuLaden;
   const setHostFilter = useCallback((f: HostFilter) => {
     setHostFilterState(f);
     saveHostFilter(f);
-  }, []);
+    if (f === TABLET_HOST) void tabletNeuLaden();
+  }, [tabletNeuLaden]);
   // A chat is being (re)loaded from its machine. Separate from busy (a turn
   // is running): typing stays possible, the message goes out once loaded.
   const [loading, setLoading] = useState(false);
@@ -623,6 +633,7 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
   // writing into whatever is opened next.
   const leaveSession = useCallback(() => {
     setDirektOffen(null);
+    setTabletOffen(null);
     setKlonFehler(null);
     navToken.current += 1;
     sessionRef.current = null;
@@ -661,8 +672,8 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
     .sort((a, b) => hostRank(a.endpointId) - hostRank(b.endpointId))
     .map((h) => ({ endpointId: h.endpointId, label: hostLabel(h.endpointId, h.name) }));
   // Lists show the iPhone's own chats like one more machine.
-  const listChoices = [{ endpointId: IPHONE_HOST, label: IPHONE_LABEL }, ...hostChoices];
-  const allSessions = [...direktAlsSitzungen(direkt.chats), ...sessions];
+  const listChoices = [{ endpointId: IPHONE_HOST, label: IPHONE_LABEL }, { endpointId: TABLET_HOST, label: TABLET_LABEL }, ...hostChoices];
+  const allSessions = [...direktAlsSitzungen(direkt.chats), ...tabletAlsSitzungen(tablet.eintraege), ...sessions];
   const activeFilter: HostFilter = listChoices.some((h) => h.endpointId === hostFilter) ? hostFilter : "all";
 
   const newSession = useCallback(async (hostId?: string) => {
@@ -731,10 +742,19 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
     }
   }, [direkt, openDirekt]);
 
+  const openTablet = useCallback((s: TaggedSession) => {
+    setPickHost(false);
+    setEinstellungen(false);
+    setShowHosts(false);
+    leaveSession();
+    setTabletOffen({ id: Number(s.sessionId), titel: s.title ?? "" });
+  }, [leaveSession]);
+
   const openAny = useCallback((s: TaggedSession) => {
     if (isDirekt(s)) openDirekt(s.sessionId);
+    else if (isTablet(s)) openTablet(s);
     else if (s._host) void openSessionRef.current(s._host, s.sessionId);
-  }, [openDirekt]);
+  }, [openDirekt, openTablet]);
 
   const openSession = useCallback(
     async (hostId: string, id: string, force = false, keepExternalGuard = false) => {
@@ -1397,14 +1417,26 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
             groups={groupSessions(filterByArchive(filterByHost(allSessions, activeFilter), archiveFilter), projects)}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
-            activeSessionId={direktOffen ?? sessionId}
-            activeHostId={direktOffen ? IPHONE_HOST : activeHostId}
+            activeSessionId={direktOffen ?? (tabletOffen ? String(tabletOffen.id) : sessionId)}
+            activeHostId={direktOffen ? IPHONE_HOST : tabletOffen ? TABLET_HOST : activeHostId}
             onOpen={(s) => { setSidebarOpen(false); openAny(s); }}
             footer={sidebarFooter}
           />
 
           <main id="chat" className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {direktOffen ? (
+            {tabletOffen ? (
+              <TabletChatAnsicht
+                key={tabletOffen.id}
+                eintrag={tabletOffen}
+                kbSchluessel={direkt.schluessel.kb}
+                klonVon={(ref) => direkt.chats.find((c) => c.herkunft?.geraet === "tablet" && c.herkunft.sessionId === ref)?.id ?? null}
+                onBack={() => setTabletOffen(null)}
+                onGeklont={(id) => {
+                  void direkt.neuLaden().then(() => openDirekt(id));
+                }}
+                onEinstellungen={() => { setTabletOffen(null); setEinstellungen(true); }}
+              />
+            ) : direktOffen ? (
               <DirektChatAnsicht
                 key={direktOffen}
                 chatId={direktOffen}
@@ -1435,6 +1467,14 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
                       : "Einmal den Mistral-Schluessel unter Einstellungen eintragen, dann geht es ohne Rechner."
                 }
                 search
+                tabletHinweis={tabletHinweis({
+                  kbDa: !!direkt.schluessel.kb,
+                  hinterlegt: direkt.hinterlegt.includes("kb"),
+                  fehlerhaft: direkt.fehlerhaft.includes("kb"),
+                  tresorDa: direkt.tresorDa,
+                  fehler: tablet.fehler,
+                  stand: tablet.stand,
+                })}
               />
             ) : (
             <>
@@ -1575,7 +1615,7 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
           onCancel={() => setPickHost(false)}
         />
       )}
-      {!direktOffen && sessionId === null && (
+      {!direktOffen && !tabletOffen && sessionId === null && (
         <UntereLeiste
           aktiv={einstellungen ? "einstellungen" : showHosts || (!connected && !reconnecting && addingHost) ? "rechner" : "chats"}
           hinweis={{ einstellungen: !direkt.schluessel.mistral && !direkt.schluessel.eurouter }}

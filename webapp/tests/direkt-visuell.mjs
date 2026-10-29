@@ -54,6 +54,26 @@ await ctx.route("**/*", async (route) => {
   if (url.startsWith("https://kb.bios.love/api/kb/mcp-tool/kb_search")) {
     return route.fulfill({ status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify({ ok: true, result: { results: [{ subject: "Signicat Wochenrunde", excerpt: "morgen 10:00", source: "calendar" }] } }) });
   }
+  // Tablet-Chats (Moose beta) in der Datenbank, dazu eine iPhone-Spiegelung,
+  // die NICHT als Tablet-Kopie erscheinen darf.
+  if (url.startsWith("https://kb.bios.love/api/kb/mcp-tool/kb_recent")) {
+    const results = [
+      { id: 441061, kind: "conversation", source: "moose-beta", subject: "Moose beta (Tablet): Wochenplanung", excerpt: "Moritz: ...", timestamp: new Date(Date.now() - 20 * 60000).toUTCString() },
+      { id: 441171, kind: "conversation", source: "goose-handy", subject: "Goose iPhone (direkt): test", excerpt: "", timestamp: new Date().toUTCString() },
+      { id: 440507, kind: "conversation", source: "moose-beta", subject: "Moose beta (Tablet): Moin", excerpt: "Moritz: Moin", timestamp: new Date(Date.now() - 26 * 3600000).toUTCString() },
+    ];
+    return route.fulfill({ status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify({ ok: true, result: { count: results.length, results } }) });
+  }
+  if (url.startsWith("https://kb.bios.love/api/kb/mcp-tool/kb_get_document")) {
+    const id = body?.arguments?.id;
+    const body_plain =
+      id === 441061
+        ? "Moritz: Was steht diese Woche an?\n\nMoose beta: Drei Dinge:\n\n- **Montag** Signicat Wochenrunde\n- **Mittwoch** Tangerina Lieferung\n\nEntwurf fuer die Runde:\nMoritz: Kurzer Stand von mir ...\n\nMoritz: Danke, merk dir das."
+        : "Moritz: Moin\n\nMoose beta: Moin Moritz!";
+    const subject = id === 441061 ? "Moose beta (Tablet): Wochenplanung" : "Moose beta (Tablet): Moin";
+    const document = { id, source: "moose-beta", source_ref: `moose-beta-tablet-chat-${id === 441061 ? 7 : 4}`, subject, timestamp: new Date().toUTCString(), body_plain };
+    return route.fulfill({ status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify({ ok: true, result: { document } }) });
+  }
   if (url.startsWith("https://kb.bios.love/api/kb/mcp-tool/kb_ingest_document")) {
     return route.fulfill({ status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify({ ok: true, result: { id: 1 } }) });
   }
@@ -113,6 +133,11 @@ try {
   ok(await page.locator("#new-on-iphone").isVisible(), "Startseite: 'Neuer Chat hier auf dem iPhone' ohne Rechner");
   ok((await page.locator("#direkt-hinweis").textContent())?.includes("Mistral"), "Hinweis: Mistral-Schluessel fehlt");
   await foto("1-start-ohne-schluessel");
+  // Tablet-Filter ohne Datenbank-Schluessel: Hinweis statt Fehler
+  await page.click("#start-page .host-filter [role=tab][data-filter=tablet]");
+  ok((await page.locator("#tablet-listen-hinweis").textContent())?.includes("Datenbank-Schluessel"), "Tablet ohne Schluessel: verstaendlicher Hinweis");
+  await foto("1b-tablet-ohne-schluessel");
+  await page.click("#start-page .host-filter [role=tab][data-filter=all]");
 
   // Schluessel eintragen
   await page.click("#nav-einstellungen");
@@ -155,7 +180,7 @@ try {
   await page.click("#direkt-zurueck");
   await page.locator("#start-page").waitFor();
   const chips = await page.locator("#start-page .host-filter [role=tab]").allTextContents();
-  ok(chips.join("|") === "Alle 4|iPhone 1|Mac Mini 2|MacBook 1", `Chips mit Anzahl: ${chips.join(" | ")}`);
+  ok(chips.join("|") === "Alle 6|iPhone 1|Tablet 2|Mac Mini 2|MacBook 1", `Chips mit Anzahl: ${chips.join(" | ")}`);
   await foto("6-liste");
   await page.click("#sidebar-toggle");
   await foto("7-seitenleiste");
@@ -194,6 +219,29 @@ try {
   await page.click("#nav-einstellungen");
   ok((await page.locator("#schluessel-mistral-stand").textContent()) === "hinterlegt", "Nach Neustart: Schluessel nach Face ID wieder offen");
   ok((await page.locator("#spiegel-stand").textContent())?.includes("Alle Direkt-Chats sind abgelegt"), "Alle Direkt-Chats in der Wissensdatenbank");
+
+  // Tablet-Chat: lesen, dann auf das iPhone klonen
+  await page.click("#nav-chats");
+  await page.click("#start-page .host-filter [role=tab][data-filter=tablet]");
+  ok((await page.locator(".recent-chat").count()) === 2, "Tablet-Filter: 2 Eintraege, iPhone-Spiegelung nicht dabei");
+  ok((await page.locator(".recent-chat").first().textContent())?.includes("Kopie aus der Datenbank"), "Tablet-Eintrag als 'Kopie aus der Datenbank'");
+  await foto("12-tablet-liste");
+  await page.locator(".recent-chat", { hasText: "Wochenplanung" }).click();
+  await page.locator("#tablet-chat .msg.agent").first().waitFor({ timeout: 15000 });
+  ok((await page.locator("#tablet-chat .msg.user").count()) === 2, "Tablet-Verlauf: 2 Beitraege von Moritz (Entwurfszeile bleibt im Text)");
+  ok((await page.locator("#tablet-chat textarea").count()) === 0, "Tablet-Chat nur lesen");
+  await foto("13-tablet-lesen");
+  await page.click("#tablet-klonen");
+  await page.locator("#direkt-chat").waitFor();
+  ok((await page.locator("#direkt-titel").textContent()) === "Klon: Wochenplanung", "Tablet-Klon angelegt");
+  ok((await page.locator("#direkt-log").textContent())?.includes("Klon vom Tablet"), "Anzeige 'Klon vom Tablet'");
+  await foto("14-tablet-klon");
+  await page.click("#direkt-zurueck");
+  await page.click("#start-page .host-filter [role=tab][data-filter=all]");
+  const kbSchreibend = aufrufe.filter((a) => a.url.includes("kb.bios.love") && !/kb_search|kb_recent|kb_get_document|kb_ingest_document/.test(a.url));
+  const tabletGeschrieben = aufrufe.filter((a) => a.url.includes("kb_ingest_document") && a.body?.arguments?.source !== "goose-handy");
+  ok(kbSchreibend.length === 0 && tabletGeschrieben.length === 0, "Tablet-Teil schreibt nichts in die Datenbank (nur die eigene iPhone-Spiegelung)");
+
   const echte = aufrufe.filter((a) => !/api\.mistral\.ai|kb\.bios\.love/.test(a.url));
   console.log(`     blockiert (Relais u. a.): ${echte.length} Anfragen, nichts davon beantwortet`);
 } catch (e) {

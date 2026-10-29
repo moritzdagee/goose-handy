@@ -19,8 +19,15 @@ export function Segment<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  // Ab 5 Chips (Alle, iPhone, Tablet, Mac Mini, MacBook) wird es auf dem
+  // iPhone zu eng: dann seitlich wischen statt Namen abzuschneiden.
+  const viele = options.length > 4;
   return (
-    <div role="tablist" aria-label={label} className={`${className} flex gap-1 rounded-xl bg-elevated p-1`}>
+    <div
+      role="tablist"
+      aria-label={label}
+      className={`${className} flex gap-1 rounded-xl bg-elevated p-1 ${viele ? "no-scrollbar overflow-x-auto" : ""}`}
+    >
       {options.map((o) => {
         const on = value === o.key;
         return (
@@ -31,7 +38,7 @@ export function Segment<T extends string>({
             aria-selected={on}
             data-filter={o.key}
             onClick={() => onChange(o.key)}
-            className={`flex min-h-9 min-w-0 ${options.length > 3 ? "flex-auto" : "flex-1"} items-center justify-center gap-1 truncate rounded-lg transition-colors duration-150 ${dense ? "px-1 text-[13px]" : "px-1.5 text-[14px]"} ${
+            className={`flex min-h-9 ${viele ? "flex-none" : options.length > 3 ? "min-w-0 flex-auto" : "min-w-0 flex-1"} items-center justify-center gap-1 truncate rounded-lg transition-colors duration-150 ${dense ? `${viele ? "px-2" : "px-1"} text-[13px]` : `${viele ? "px-2.5" : "px-1.5"} text-[14px]`} ${
               on ? "bg-surface font-semibold text-ink shadow-sm" : "text-ink-muted"
             }`}
           >

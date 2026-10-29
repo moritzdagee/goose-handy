@@ -32,6 +32,16 @@ export function isDirekt(s: { _host: string }): boolean {
   return s._host === IPHONE_HOST;
 }
 
+// Chats vom Android-Tablet (App Moose beta, 29.10.2026): das Tablet ist kein
+// Gastgeber, sie kommen als Kopie aus der Wissensdatenbank (nur lesen, dann
+// auf das iPhone klonen). In den Listen wie ein weiterer "Rechner".
+export const TABLET_HOST = "tablet";
+export const TABLET_GROUP = "Vom Tablet";
+
+export function isTablet(s: { _host: string }): boolean {
+  return s._host === TABLET_HOST;
+}
+
 export function isPhoneStarted(s: { cwd?: string | null }): boolean {
   const parts = (s.cwd ?? "").replace(/[\\/]+$/, "").split(/[\\/]/);
   return parts[parts.length - 1] === PHONE_FOLDER;
@@ -154,11 +164,14 @@ export function groupSessions(
   const loose: TaggedSession[] = [];
   const phone: TaggedSession[] = [];
   const iphone: TaggedSession[] = [];
+  const tablet: TaggedSession[] = [];
   const byProject = new Map<string, TaggedSession[]>();
   for (const s of sessions) {
     const pid = sessionProjectId(s);
     if (isDirekt(s)) {
       iphone.push(s);
+    } else if (isTablet(s)) {
+      tablet.push(s);
     } else if (!pid) {
       (isPhoneStarted(s) ? phone : loose).push(s);
     } else {
@@ -170,6 +183,7 @@ export function groupSessions(
   }
   const out: SessionGroup[] = [];
   if (iphone.length) out.push({ key: "~iphone", label: IPHONE_GROUP, sessions: iphone });
+  if (tablet.length) out.push({ key: "~tablet", label: TABLET_GROUP, sessions: tablet });
   if (loose.length) out.push({ key: "~", label: "chats", sessions: loose });
   if (phone.length) out.push({ key: "~phone", label: PHONE_FOLDER, sessions: phone });
   const named = [...byProject.entries()].map(([key, group]) => ({
