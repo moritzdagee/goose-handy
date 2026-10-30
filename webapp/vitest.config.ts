@@ -18,5 +18,9 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["src/test-setup.ts"],
     restoreMocks: true,
+    // Default 5000 ms reichte am 30.10.2026 nicht mehr: chat.test.ts und
+    // ui.test.tsx liefen mit fake-indexeddb + jsdom knapp darueber und timed
+    // out. 15 s Puffer, damit echte Logikfehler sichtbar bleiben.
+    testTimeout: 15000,
   },
 });
