@@ -4,14 +4,21 @@
 import type { ReactNode } from "react";
 
 export function GooseMark({ size = 32 }: { size?: number }) {
+  // Weisse Gans auf lila Grund, wie das App-Icon (public/icon-quadrat.svg).
+  const d =
+    "M4.6 15.2c2.4-.9 4.1-2.6 5.3-5.1.6-1.3 1.5-2.2 2.6-2.6-.3 1.5-1 2.9-2 4.1 1.5-.2 3-.9 4.3-2.1-.6 1.8-1.9 3.3-3.6 4.2 2 .1 3.9-.4 5.5-1.4-1.3 2.4-3.7 4.1-6.5 4.6 1.2 1 2.7 1.6 4.3 1.8-2.1 1.5-4.7 2-7.3 1.6l-1.9 3.4c-.2.4-.8.4-1 0l-1.6-2.9c-.3-.6-.2-1.3.3-1.8Z";
   return (
-    <span
+    <svg
       aria-hidden
-      className="inline-flex shrink-0 items-center justify-center bg-accent font-bold text-accent-ink"
-      style={{ width: size, height: size, borderRadius: size * 0.28, fontSize: size * 0.58, lineHeight: 1 }}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className="shrink-0"
+      style={{ borderRadius: size * 0.28 }}
     >
-      G
-    </span>
+      <rect width="24" height="24" rx="6.7" fill="#5C2CB4" />
+      <path d={d} fill="#fff" />
+    </svg>
   );
 }
 

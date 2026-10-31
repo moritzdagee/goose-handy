@@ -73,7 +73,7 @@ export function AppHeader({
         )}
         <span className={`flex shrink-0 items-center gap-1.5 ${connected || connecting || direkt ? "" : "pl-2"} md:pl-2`}>
           <GooseMark size={26} />
-          <span className="text-[17px] font-semibold">Goose</span>
+          <span className="text-[17px] font-semibold">Moose Beta</span>
         </span>
         <span id="build-stamp" className="hidden self-end pb-1 pl-1 font-mono text-[10px] text-ink-faint md:inline">
           {build}
