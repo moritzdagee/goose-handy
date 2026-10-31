@@ -112,18 +112,25 @@ export function DirektEinstellungen({
   hinterlegt,
   fehlerhaft,
   ausstehend,
+  wiederhergestellt = 0,
   onSpeichern,
   onEntfernen,
   onNachholen,
+  onLaden,
 }: {
   tresorDa: boolean;
   hinterlegt: SchluesselSlot[];
   fehlerhaft: SchluesselSlot[];
   ausstehend: number;
+  /** Wie viele Chats seit dem Entsperren aus der Datenbank zurueckgeholt wurden. */
+  wiederhergestellt?: number;
   onSpeichern: (slot: SchluesselSlot, wert: string) => Promise<void>;
   onEntfernen: (slot: SchluesselSlot) => void;
   onNachholen: () => void;
+  onLaden?: () => Promise<number>;
 }) {
+  const [laedt, setLaedt] = useState(false);
+  const [ladeMeldung, setLadeMeldung] = useState<string | null>(null);
   return (
     <div id="einstellungen" className="fade-in flex-1 overflow-y-auto overscroll-contain pb-safe">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 pt-5 pb-6">
@@ -162,6 +169,41 @@ export function DirektEinstellungen({
             <button id="spiegel-nachholen" type="button" onClick={onNachholen} className="min-h-11 self-start rounded-xl bg-elevated px-4 text-[14px] text-ink">
               Jetzt ablegen
             </button>
+          )}
+        </section>
+        <section aria-label="Chats aus der Datenbank wiederherstellen" className="flex flex-col gap-2 rounded-2xl bg-surface p-4">
+          <h3 className="text-[16px] font-semibold">Wiederherstellung</h3>
+          <p id="wiederherstellung-stand" className="text-[14px] text-ink-muted">
+            {wiederhergestellt > 0
+              ? `${wiederhergestellt === 1 ? "Ein Chat wurde" : `${wiederhergestellt} Chats wurden`} aus der Datenbank wiederhergestellt.`
+              : "Lesezeichen neu angelegt und der Speicher war weg? Fehlende Chats kommen aus der Datenbank zurueck. Chats auf dem iPhone bleiben immer unangetastet."}
+          </p>
+          {hinterlegt.includes("kb") && onLaden && (
+            <button
+              id="wiederherstellung-laden"
+              type="button"
+              disabled={laedt}
+              className="min-h-11 self-start rounded-xl bg-elevated px-4 text-[14px] text-ink disabled:opacity-40"
+              onClick={async () => {
+                setLaedt(true);
+                setLadeMeldung(null);
+                try {
+                  const n = await onLaden();
+                  setLadeMeldung(n === 0 ? "Alles da, nichts zu holen." : n === 1 ? "Ein Chat wiederhergestellt." : `${n} Chats wiederhergestellt.`);
+                } catch (f) {
+                  setLadeMeldung(f instanceof Error ? f.message : String(f));
+                } finally {
+                  setLaedt(false);
+                }
+              }}
+            >
+              {laedt ? "Laedt ..." : "Aus Datenbank laden"}
+            </button>
+          )}
+          {ladeMeldung && (
+            <div id="wiederherstellung-meldung" role="status" className="text-[13px] text-ink-muted">
+              {ladeMeldung}
+            </div>
           )}
         </section>
       </div>

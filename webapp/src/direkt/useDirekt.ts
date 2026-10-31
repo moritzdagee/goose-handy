@@ -7,6 +7,7 @@ import { alleModelle, gemerkteModelle, modelleMerken, type ModellWahl } from "./
 import { alleWartendenSenden } from "./chat";
 import { alleChats, type DirektChat } from "./speicher";
 import { ausstehendeSpiegeln } from "./spiegel";
+import { chatsWiederherstellen } from "./wiederherstellen";
 import {
   alleSchluesselLesen,
   hinterlegteSlots,
@@ -33,6 +34,7 @@ export function useDirekt(tresor: CryptoKey | null, abruf?: typeof fetch) {
   const [modelle, setModelle] = useState<ModellWahl[]>(gemerkteModelle);
   const [modellFehler, setModellFehler] = useState<string[]>([]);
   const [speicherFehler, setSpeicherFehler] = useState<string | null>(null);
+  const [wiederhergestellt, setWiederhergestellt] = useState(0);
   const schluesselRef = useRef(schluessel);
   schluesselRef.current = schluessel;
 
@@ -71,11 +73,37 @@ export function useDirekt(tresor: CryptoKey | null, abruf?: typeof fetch) {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
     let geaendert = 0;
     if (s.mistral || s.eurouter) geaendert += await alleWartendenSenden({ schluessel: s, abruf });
-    if (s.kb) geaendert += await ausstehendeSpiegeln(s.kb, abruf);
+    if (s.kb) {
+      geaendert += await ausstehendeSpiegeln(s.kb, abruf);
+      // Fehlende Chats aus der Datenbank ergaenzen (z.B. nach neuem
+      // Home-Bildschirm-Lesezeichen); schlaegt offline fehl, ohne aufzuhalten.
+      try {
+        const w = await chatsWiederherstellen(s.kb, abruf);
+        if (w.wiederhergestellt > 0) {
+          setWiederhergestellt((v) => v + w.wiederhergestellt);
+          geaendert += w.wiederhergestellt;
+        }
+      } catch {
+        // Datenbank nicht erreichbar: beim naechsten Netz erneut versuchen
+      }
+    }
     if (geaendert) {
       await neuLaden();
       direktGeaendertMelden();
     }
+  }, [abruf, neuLaden]);
+
+  // Knopf in den Einstellungen: fehlende Chats sofort aus der Datenbank holen.
+  const laden = useCallback(async (): Promise<number> => {
+    const s = schluesselRef.current;
+    if (!s.kb) return 0;
+    const w = await chatsWiederherstellen(s.kb, abruf);
+    if (w.wiederhergestellt > 0) {
+      setWiederhergestellt((v) => v + w.wiederhergestellt);
+      await neuLaden();
+      direktGeaendertMelden();
+    }
+    return w.wiederhergestellt;
   }, [abruf, neuLaden]);
 
   // Mit neuen Schluesseln: Modelle holen, Liegengebliebenes nachholen.
@@ -135,8 +163,10 @@ export function useDirekt(tresor: CryptoKey | null, abruf?: typeof fetch) {
     modelle,
     modellFehler,
     speicherFehler,
+    wiederhergestellt,
     neuLaden,
     nachholen,
+    laden,
     speichern,
     entfernen,
   };

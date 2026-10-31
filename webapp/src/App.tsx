@@ -1371,9 +1371,11 @@ export function App({ roam, tresor = null }: { roam: RoamClient; tresor?: Crypto
           hinterlegt={direkt.hinterlegt}
           fehlerhaft={direkt.fehlerhaft}
           ausstehend={direkt.chats.filter((c) => c.spiegel === "ausstehend").length}
+          wiederhergestellt={direkt.wiederhergestellt}
           onSpeichern={direkt.speichern}
           onEntfernen={direkt.entfernen}
           onNachholen={() => void direkt.nachholen()}
+          onLaden={direkt.laden}
         />
       ) : showHosts || (!connected && !reconnecting && addingHost) ? (
         // Machines page. Without any machine the app no longer waits here:

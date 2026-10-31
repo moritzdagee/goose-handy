@@ -1,5 +1,26 @@
 # CHANGELOG goose-handy
 
+## 2026-10-31 Wiederherstellung der iPhone-Chats und Icon ohne Alpha (Zweig feat/direkt-wiederherstellung)
+
+- Neu `webapp/src/direkt/wiederherstellen.ts`: stellt Direkt-Chats aus der Wissensdatenbank wieder
+  her, wenn der iPhone-Speicher weg war (z.B. nach neuem Home-Bildschirm-Lesezeichen). Liest die
+  gespiegelten Eintraege (kb_recent, Quelle `goose-handy`, Etikett `agent:goose-handy`, dann
+  kb_get_document je Eintrag, Kennung source_ref `goose-handy-iphone-chat-<id>`) und wandelt sie
+  zurueck: Rolle aus dem Zeilen-Praefix ("Moritz" / "Goose (iPhone)" / "Hinweis"), Titel ohne
+  Betreff-Praefix, erstellt aus metadata.erstellt (sonst Zeitstempel des Eintrags). NUR LESEND:
+  bestehende lokale Chats werden nie ueberschrieben, wiederhergestellte bekommen spiegel
+  "gespiegelt". Entschiedene Eintraege bleiben in localStorage vermerkt (laeuft idempotent, faellt
+  mit dem Speicher weg). Laeuft beim Start mit (useDirekt `nachholen`) und per Knopf
+  "Aus Datenbank laden" in den Direkt-Einstellungen samt Hinweis "X Chats wiederhergestellt".
+- `spiegel.ts`: Praefix als `SPIEGEL_REF_PRAEFIX` exportiert (Spiegeln und Wiederherstellen teilen
+  sich die Kennung).
+- Icon: `apple-touch-icon.png` und `icon-512.png` jetzt deckend (kein Alpha-Kanal mehr), ganze
+  Flaeche dunkles Lila #5C2CB4, weisse Gans mittig in der Sicherheitszone; Quelle
+  `icon-quadrat.svg`. `manifest.webmanifest`: icon-512 mit purpose "any maskable". Grund: auf dem
+  iPhone erschien das Icon grau/weiss statt lila (iOS fuellt transparente Flaechen selbst).
+- Tests: 6 neue Faelle in `wiederherstellen.test.ts` (Zerlegen mit Code-Bloecken, Umwandlung,
+  Wiederherstellung, kein Ueberschreiben + idempotent, fremde Kennung, offline).
+
 ## 2026-10-29 Direkt-Chat auf dem iPhone (Zweig feat/direkt-chat)
 
 - Neu `webapp/src/direkt/`: Direkt-Chat mit Mistral (EUrouter optional) ohne Mac Mini und MacBook,
