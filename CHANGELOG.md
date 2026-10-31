@@ -1,5 +1,15 @@
 # CHANGELOG goose-handy
 
+## 2026-10-31 - vitest: Worker begrenzt gegen Sammellauf-Last (tests-taeglich 31.10.2026)
+
+- Anlass: tests-taeglich 31.10.2026 meldete goose-handy rot: 184 Tests bestanden,
+  aber 3 von 18 forks-Workern konnten in der frischen /tmp-Kopie unter Volllast
+  nicht starten ("Timeout waiting for worker to respond", Import 142 s).
+- `webapp/vitest.config.ts`: `pool: forks` mit `maxForks: 4`, damit Last im
+  Sammellauf nicht als rote Testdateien gewertet wird. Lokal `npm test`: 241/241
+  bestanden in 2,4 s.
+
+
 ## 2026-10-29 Direkt-Chat auf dem iPhone (Zweig feat/direkt-chat)
 
 - Neu `webapp/src/direkt/`: Direkt-Chat mit Mistral (EUrouter optional) ohne Mac Mini und MacBook,
