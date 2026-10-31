@@ -22,5 +22,17 @@ export default defineConfig({
     // ui.test.tsx liefen mit fake-indexeddb + jsdom knapp darueber und timed
     // out. 15 s Puffer, damit echte Logikfehler sichtbar bleiben.
     testTimeout: 15000,
+    // Im tests-taeglich-Sammellauf 31.10.2026 (frische Kopie in /tmp, Volllast)
+    // konnten 3 von 18 forks-Worker nicht innerhalb des Defaults starten
+    // ("Timeout waiting for worker to respond", Import 142 s). Weniger Worker
+    // und laengeres Start-Limit, damit Last nicht als roter Test gewertet wird.
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        maxForks: 4,
+        minForks: 1,
+        execArgv: [],
+      },
+    },
   },
 });
