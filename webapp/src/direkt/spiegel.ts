@@ -11,9 +11,10 @@ import { alleChats, chatAendern, chatLesen, type DirektChat } from "./speicher";
 export const SPIEGEL_QUELLE = "goose-handy";
 export const SPIEGEL_AGENT = "goose-handy";
 export const SPIEGEL_GERAET = "iphone";
+export const SPIEGEL_REF_PRAEFIX = "goose-handy-iphone-chat-";
 
 export function conversationId(chatId: string): string {
-  return `goose-handy-iphone-chat-${chatId}`;
+  return `${SPIEGEL_REF_PRAEFIX}${chatId}`;
 }
 
 function sprecher(rolle: string): string {
